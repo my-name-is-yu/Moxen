@@ -72,6 +72,26 @@ describe('Goal', () => {
   it('rejects invalid GoalType', () => {
     expect(() => Goal.parse({ title: 'T', type: 'invalid-type' })).toThrow();
   });
+
+  it('defaults refined to false', () => {
+    const goal = Goal.parse({ title: 'New goal' });
+    expect(goal.refined).toBe(false);
+  });
+
+  it('accepts refined: true', () => {
+    const goal = Goal.parse({ title: 'New goal', refined: true });
+    expect(goal.refined).toBe(true);
+  });
+
+  it('accepts completion_criteria when provided', () => {
+    const goal = Goal.parse({ title: 'G', completion_criteria: 'All tests green' });
+    expect(goal.completion_criteria).toBe('All tests green');
+  });
+
+  it('completion_criteria is undefined when not provided', () => {
+    const goal = Goal.parse({ title: 'G' });
+    expect(goal.completion_criteria).toBeUndefined();
+  });
 });
 
 describe('TrustBalance', () => {

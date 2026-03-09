@@ -23,6 +23,7 @@ function makeGoal(overrides: Partial<Parameters<typeof Goal.parse>[0]> = {}): Go
   return Goal.parse({
     title: 'Test Goal',
     achievement_thresholds: { progress: 0.9 },
+    checklist_created: true, // skip checklist_missing sentinel; use threshold-based gap analysis
     state_vector: {
       progress: { value: 0.4, confidence: 0.8, source: 'tool_output' },
     },
@@ -34,8 +35,9 @@ function makeCompletedGoal(overrides: Partial<Parameters<typeof Goal.parse>[0]> 
   return Goal.parse({
     title: 'Completed Goal',
     achievement_thresholds: { progress: 0.9 },
+    checklist_created: true, // skip checklist_missing sentinel; use threshold-based gap analysis
     state_vector: {
-      // value exceeds threshold → magnitude = 0
+      // value exceeds threshold → magnitude = 0 → all gaps satisfied → completed
       progress: { value: 0.95, confidence: 0.9, source: 'tool_output' },
     },
     ...overrides,

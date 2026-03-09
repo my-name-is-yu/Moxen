@@ -118,7 +118,7 @@ describe('run()', () => {
       tool_input: { command: 'git push origin main' },
     });
     expect(result.exitCode).toBe(2);
-    expect(result.stderrMessage).toContain('[Motive]');
+    expect(result.stderrMessage).toContain('[Motiva]');
     expect(result.stderrMessage).toContain('irreversible');
   });
 

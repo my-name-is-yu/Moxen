@@ -43,10 +43,11 @@ beforeEach(() => {
 
 // ---------------------------------------------------------------------------
 // State vector updates — Write / Edit
+// Progress is now driven by checklist verification, not blind +0.05 increments.
 // ---------------------------------------------------------------------------
 
-describe('post-tool-use: Write/Edit increments progress', () => {
-  it('Write tool increments progress by 0.05', async () => {
+describe('post-tool-use: Write/Edit does NOT blindly increment progress', () => {
+  it('Write tool does not change progress when no checklist exists', async () => {
     const goal = makeGoal({
       state_vector: {
         progress: { value: 0.5, confidence: 0.8, source: 'llm_estimate' },
@@ -57,10 +58,11 @@ describe('post-tool-use: Write/Edit increments progress', () => {
     await processPostToolUse({ tool_name: 'Write', tool_output: 'ok' }, tmpRoot);
 
     const updated = manager.loadGoal(goal.id)!;
-    expect(updated.state_vector['progress']?.value).toBeCloseTo(0.55, 5);
+    // Progress unchanged — no checklist, no +0.05 bump
+    expect(updated.state_vector['progress']?.value).toBe(0.5);
   });
 
-  it('Edit tool increments progress by 0.05', async () => {
+  it('Edit tool does not change progress when no checklist exists', async () => {
     const goal = makeGoal({
       state_vector: {
         progress: { value: 0.7, confidence: 0.8, source: 'llm_estimate' },
@@ -71,10 +73,11 @@ describe('post-tool-use: Write/Edit increments progress', () => {
     await processPostToolUse({ tool_name: 'Edit', tool_output: '' }, tmpRoot);
 
     const updated = manager.loadGoal(goal.id)!;
-    expect(updated.state_vector['progress']?.value).toBeCloseTo(0.75, 5);
+    // Progress unchanged — no checklist, no +0.05 bump
+    expect(updated.state_vector['progress']?.value).toBe(0.7);
   });
 
-  it('progress is capped at 1.0 regardless of increments', async () => {
+  it('progress value is preserved after Write when no checklist', async () => {
     const goal = makeGoal({
       state_vector: {
         progress: { value: 0.98, confidence: 0.8, source: 'llm_estimate' },
@@ -86,6 +89,7 @@ describe('post-tool-use: Write/Edit increments progress', () => {
 
     const updated = manager.loadGoal(goal.id)!;
     expect(updated.state_vector['progress']?.value).toBeLessThanOrEqual(1.0);
+    expect(updated.state_vector['progress']?.value).toBe(0.98);
   });
 });
 
@@ -184,12 +188,13 @@ describe('post-tool-use: error output handling', () => {
 // ---------------------------------------------------------------------------
 
 describe('post-tool-use: gap recomputation', () => {
-  it('gaps are recomputed after state vector update', async () => {
+  it('gaps are recomputed after any tool use', async () => {
+    // A goal with checklist_created: false (default) and no achievement_thresholds
+    // should emit the checklist_missing sentinel gap after tool use
     const goal = makeGoal({
-      achievement_thresholds: { progress: 0.9 },
-      state_vector: {
-        progress: { value: 0.5, confidence: 0.8, source: 'llm_estimate' },
-      },
+      checklist_created: false,
+      achievement_thresholds: {},
+      state_vector: {},
     });
     manager.addGoal(goal);
 
@@ -199,12 +204,37 @@ describe('post-tool-use: gap recomputation', () => {
     );
 
     const updated = manager.loadGoal(goal.id)!;
+    // Gaps should have been recomputed — without a checklist, checklist_missing is emitted
     expect(updated.gaps.length).toBeGreaterThan(0);
-    // After incrementing progress from 0.5 to 0.55, gap magnitude should be less than 1
-    const progressGap = updated.gaps.find(g => g.dimension === 'progress');
-    expect(progressGap).toBeDefined();
-    expect(progressGap!.magnitude).toBeGreaterThan(0);
-    expect(progressGap!.magnitude).toBeLessThan(1);
+    const checklistGap = updated.gaps.find(g => g.dimension === 'checklist_missing');
+    expect(checklistGap).toBeDefined();
+    expect(checklistGap!.magnitude).toBe(1.0);
+  });
+
+  it('quality_score gap is recomputed after Bash test run', async () => {
+    const goal = makeGoal({
+      checklist_created: true,
+      achievement_thresholds: { quality_score: 0.8 },
+      state_vector: {
+        quality_score: { value: 0.0, confidence: 0.5, source: 'llm_estimate' },
+      },
+    });
+    manager.addGoal(goal);
+
+    await processPostToolUse(
+      {
+        tool_name: 'Bash',
+        tool_input: { command: 'npm test' },
+        tool_output: '10 passed, 0 failed\nAll tests pass',
+      },
+      tmpRoot,
+    );
+
+    const updated = manager.loadGoal(goal.id)!;
+    // quality_score updated to 1.0 — gap magnitude should now be 0
+    const qualityGap = updated.gaps.find(g => g.dimension === 'quality_score');
+    expect(qualityGap).toBeDefined();
+    expect(qualityGap!.magnitude).toBe(0);
   });
 });
 
@@ -213,18 +243,18 @@ describe('post-tool-use: gap recomputation', () => {
 // ---------------------------------------------------------------------------
 
 describe('post-tool-use: completion detection', () => {
-  it('marks goal as completed when all gaps fall below threshold', async () => {
+  it('marks goal as completed when all gaps are zero (empty thresholds + checklist)', async () => {
+    // A goal with checklist_created: true and no achievement_thresholds has
+    // zero threshold-based gaps. Satisficing marks it completed (gaps.length === 0).
     const goal = makeGoal({
-      achievement_thresholds: { progress: 0.9 },
-      state_vector: {
-        // progress at 0.89 — one Write bump (0.05) brings it to 0.94 > 0.9 → gap = 0
-        progress: { value: 0.89, confidence: 0.95, source: 'llm_estimate' },
-      },
+      checklist_created: true,
+      achievement_thresholds: {},
+      state_vector: {},
     });
     manager.addGoal(goal);
 
     const result = await processPostToolUse(
-      { tool_name: 'Write', tool_output: '' },
+      { tool_name: 'Read', tool_output: '' },
       tmpRoot,
     );
 
@@ -235,20 +265,21 @@ describe('post-tool-use: completion detection', () => {
 
   it('completed goals are removed from active_goal_ids', async () => {
     const goal = makeGoal({
-      achievement_thresholds: { progress: 0.9 },
-      state_vector: {
-        progress: { value: 0.89, confidence: 0.95, source: 'llm_estimate' },
-      },
+      checklist_created: true,
+      achievement_thresholds: {},
+      state_vector: {},
     });
     manager.addGoal(goal);
 
-    await processPostToolUse({ tool_name: 'Write', tool_output: '' }, tmpRoot);
+    await processPostToolUse({ tool_name: 'Read', tool_output: '' }, tmpRoot);
 
     const state = manager.loadState();
     expect(state.active_goal_ids).not.toContain(goal.id);
   });
 
-  it('does not mark in-progress goal as completed', async () => {
+  it('does not mark in-progress goal as completed when checklist_missing gap exists', async () => {
+    // Default goal has checklist_created: false — emits checklist_missing gap,
+    // satisficing returns needs_verification (not completed).
     const goal = makeGoal({
       achievement_thresholds: { progress: 0.9 },
       state_vector: {
@@ -265,6 +296,27 @@ describe('post-tool-use: completion detection', () => {
     expect(result.goalsCompleted).not.toContain(goal.id);
     const updated = manager.loadGoal(goal.id)!;
     expect(updated.status).toBe('active');
+  });
+
+  it('marks goal with all threshold gaps ≤ 0.05 as completed (checklist_created: true)', async () => {
+    // progress = 0.96, threshold = 0.9 → gap magnitude = (0.9 - 0.96) / 0.9 → clamped to 0
+    const goal = makeGoal({
+      checklist_created: true,
+      achievement_thresholds: { progress: 0.9 },
+      state_vector: {
+        progress: { value: 0.96, confidence: 0.9, source: 'tool_output' },
+      },
+    });
+    manager.addGoal(goal);
+
+    const result = await processPostToolUse(
+      { tool_name: 'Bash', tool_input: { command: 'echo ok' }, tool_output: 'ok' },
+      tmpRoot,
+    );
+
+    expect(result.goalsCompleted).toContain(goal.id);
+    const updated = manager.loadGoal(goal.id)!;
+    expect(updated.status).toBe('completed');
   });
 });
 
@@ -308,7 +360,7 @@ describe('post-tool-use: logging', () => {
   it('appends an entry to log.jsonl', async () => {
     await processPostToolUse({ tool_name: 'Read', tool_output: 'ok' }, tmpRoot);
 
-    const logPath = join(tmpRoot, '.motive', 'log.jsonl');
+    const logPath = join(tmpRoot, '.motiva', 'log.jsonl');
     expect(existsSync(logPath)).toBe(true);
     const lines = readFileSync(logPath, 'utf-8').trim().split('\n');
     const entry = JSON.parse(lines[lines.length - 1]);

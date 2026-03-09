@@ -11,8 +11,11 @@ describe('GapAnalysisEngine', () => {
 
   describe('computeGaps', () => {
     it('computes basic gaps correctly', () => {
+      // checklist_created: true bypasses the checklist_missing sentinel
+      // and falls through to threshold-based gap analysis
       const goal = Goal.parse({
         title: 'Test goal',
+        checklist_created: true,
         achievement_thresholds: { progress: 0.9, quality_score: 0.8 },
         state_vector: {
           progress: { value: 0.3, confidence: 0.85, source: 'tool_output' },
@@ -29,6 +32,7 @@ describe('GapAnalysisEngine', () => {
     it('sorts by magnitude * confidence descending', () => {
       const goal = Goal.parse({
         title: 'Test',
+        checklist_created: true,
         achievement_thresholds: { progress: 0.9, quality_score: 0.8 },
         state_vector: {
           progress: { value: 0.3, confidence: 0.85 },
@@ -45,6 +49,7 @@ describe('GapAnalysisEngine', () => {
     it('handles inverse dimension (open_issues)', () => {
       const goal = Goal.parse({
         title: 'Test',
+        checklist_created: true,
         achievement_thresholds: { open_issues: 2 },
         state_vector: {
           open_issues: { value: 5, confidence: 0.9, source: 'tool_output' },
@@ -58,6 +63,7 @@ describe('GapAnalysisEngine', () => {
     it('returns max gap with low confidence when no observation', () => {
       const goal = Goal.parse({
         title: 'Test',
+        checklist_created: true,
         achievement_thresholds: { progress: 0.9 },
         state_vector: {},
       });
@@ -69,6 +75,7 @@ describe('GapAnalysisEngine', () => {
     it('returns zero magnitude for completed dimensions', () => {
       const goal = Goal.parse({
         title: 'Done',
+        checklist_created: true,
         achievement_thresholds: { progress: 0.9 },
         state_vector: { progress: { value: 0.95, confidence: 0.9 } },
       });
@@ -79,11 +86,24 @@ describe('GapAnalysisEngine', () => {
     it('returns zero magnitude when open_issues at or below target', () => {
       const goal = Goal.parse({
         title: 'Test',
+        checklist_created: true,
         achievement_thresholds: { open_issues: 2 },
         state_vector: { open_issues: { value: 1, confidence: 0.9 } },
       });
       const gaps = engine.computeGaps(goal);
       expect(gaps[0].magnitude).toBe(0);
+    });
+
+    it('emits checklist_missing gap when checklist_created is false (default)', () => {
+      // Default goal has checklist_created: false and no achievement_thresholds
+      // — should emit sentinel gap so the agent knows to create a checklist first
+      const goal = Goal.parse({
+        title: 'No Checklist',
+      });
+      const gaps = engine.computeGaps(goal);
+      expect(gaps).toHaveLength(1);
+      expect(gaps[0].dimension).toBe('checklist_missing');
+      expect(gaps[0].magnitude).toBe(1.0);
     });
   });
 
@@ -91,6 +111,7 @@ describe('GapAnalysisEngine', () => {
     it('returns highest magnitude * confidence', () => {
       const goal = Goal.parse({
         title: 'Test',
+        checklist_created: true,
         achievement_thresholds: { progress: 0.9, quality: 0.8 },
         state_vector: {
           progress: { value: 0.3, confidence: 0.85 },
@@ -101,7 +122,8 @@ describe('GapAnalysisEngine', () => {
     });
 
     it('returns 0 for empty thresholds', () => {
-      const goal = Goal.parse({ title: 'Empty', achievement_thresholds: {} });
+      // When checklist_created is true and thresholds are empty, no gaps are computed
+      const goal = Goal.parse({ title: 'Empty', checklist_created: true, achievement_thresholds: {} });
       expect(engine.maxGapScore(goal)).toBe(0);
     });
   });
@@ -110,6 +132,7 @@ describe('GapAnalysisEngine', () => {
     it('returns false when gaps remain', () => {
       const goal = Goal.parse({
         title: 'WIP',
+        checklist_created: true,
         achievement_thresholds: { progress: 0.9 },
         state_vector: { progress: { value: 0.3, confidence: 0.85 } },
       });
@@ -119,6 +142,7 @@ describe('GapAnalysisEngine', () => {
     it('returns true when all gaps below threshold', () => {
       const goal = Goal.parse({
         title: 'Done',
+        checklist_created: true,
         achievement_thresholds: { progress: 0.9 },
         state_vector: { progress: { value: 0.92, confidence: 0.9 } },
       });

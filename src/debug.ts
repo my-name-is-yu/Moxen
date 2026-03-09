@@ -1,11 +1,11 @@
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
-const ENABLED = process.env.MOTIVE_DEBUG === '1';
+const ENABLED = process.env.MOTIVA_DEBUG === '1';
 
 function getLogPath(): string {
-  const root = process.env.MOTIVE_PROJECT_ROOT ?? process.cwd();
-  return join(root, '.motive', 'debug.log');
+  const root = process.env.MOTIVA_PROJECT_ROOT ?? process.cwd();
+  return join(root, '.motiva', 'debug.log');
 }
 
 function noop(_component: string, _message: string, _data?: Record<string, unknown>): void {

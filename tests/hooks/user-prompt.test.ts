@@ -24,6 +24,7 @@ function makeGoal(overrides: Partial<Parameters<typeof Goal.parse>[0]> = {}): Re
     type: 'dissatisfaction',
     status: 'active',
     motivation_score: 0.7,
+    refined: true, // default to refined so tests exercise the normal prompt injection path
     ...overrides,
   });
 }
@@ -35,7 +36,7 @@ function makeTempProject(): string {
 }
 
 function writeConfig(root: string, content: string): void {
-  const motiveDir = join(root, '.motive');
+  const motiveDir = join(root, '.motiva');
   mkdirSync(motiveDir, { recursive: true });
   writeFileSync(join(motiveDir, 'config.yaml'), content, 'utf-8');
 }
@@ -112,7 +113,7 @@ describe('buildInjectedContext', () => {
 
   it('includes Motive label', () => {
     const goal = makeGoal();
-    expect(buildInjectedContext(goal)).toContain('[Motive]');
+    expect(buildInjectedContext(goal)).toContain('[Motiva]');
   });
 
   it('includes progress percentage when state_vector has progress', () => {
@@ -147,6 +148,22 @@ describe('buildInjectedContext', () => {
     const ctx = buildInjectedContext(goal);
     expect(ctx).toContain('Suggested next task');
   });
+
+  it('includes completion_criteria when the goal is refined with criteria', () => {
+    const goal = makeGoal({
+      refined: true,
+      completion_criteria: 'All unit tests pass and PR reviewed',
+    });
+    const ctx = buildInjectedContext(goal);
+    expect(ctx).toContain('All unit tests pass and PR reviewed');
+    expect(ctx).toContain('Completion criteria');
+  });
+
+  it('does not include completion_criteria line when goal has none', () => {
+    const goal = makeGoal({ completion_criteria: undefined });
+    const ctx = buildInjectedContext(goal);
+    expect(ctx).not.toContain('Completion criteria');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -163,7 +180,7 @@ describe('buildReminderContext', () => {
     const highGoal = makeGoal({ title: 'High priority goal', motivation_score: 0.9 });
     const ctx = buildReminderContext([lowGoal, highGoal]);
     expect(ctx).toContain('High priority goal');
-    expect(ctx).toContain('[Motive]');
+    expect(ctx).toContain('[Motiva]');
   });
 
   it('picks the goal with the highest motivation_score', () => {
@@ -201,7 +218,7 @@ describe('run()', () => {
     const { output, exitCode } = run({ prompt: 'add auth middleware' }, projectRoot);
     expect(exitCode).toBe(0);
     expect(output.prompt).toContain('add auth middleware');
-    expect(output.prompt).toContain('[Motive]');
+    expect(output.prompt).toContain('[Motiva]');
     expect(output.prompt).toContain('Auth module');
   });
 
@@ -224,7 +241,7 @@ describe('run()', () => {
 
     const { output, exitCode, stderrMessage } = run({ prompt: 'check the weather API' }, projectRoot);
     expect(exitCode).toBe(2);
-    expect(stderrMessage).toContain('[Motive]');
+    expect(stderrMessage).toContain('[Motiva]');
     expect(stderrMessage).toContain('strict_goal_alignment');
     // prompt is still returned unchanged
     expect(output.prompt).toBe('check the weather API');

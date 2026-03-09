@@ -2,6 +2,9 @@ import { z } from 'zod';
 import { randomUUID } from 'node:crypto';
 
 // Enums
+export const ChecklistItemStatus = z.enum(['pending', 'self_verified', 'verified', 'failed']);
+export type ChecklistItemStatus = z.infer<typeof ChecklistItemStatus>;
+
 export const ObservationSource = z.enum(['tool_output', 'llm_estimate', 'user_input']);
 export type ObservationSource = z.infer<typeof ObservationSource>;
 
@@ -10,6 +13,34 @@ export type GoalType = z.infer<typeof GoalType>;
 
 export const GoalStatus = z.enum(['active', 'completed', 'paused', 'abandoned']);
 export type GoalStatus = z.infer<typeof GoalStatus>;
+
+// VerificationType — discriminated union
+export const VerificationType = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('bash'), command: z.string() }),
+  z.object({ type: z.literal('file_exists'), glob: z.string() }),
+  z.object({ type: z.literal('file_contains'), glob: z.string(), pattern: z.string() }),
+  z.object({ type: z.literal('manual') }),
+]);
+export type VerificationType = z.infer<typeof VerificationType>;
+
+// ChecklistItem
+export const ChecklistItem = z.object({
+  id: z.string(),
+  description: z.string(),
+  verification: VerificationType,
+  status: ChecklistItemStatus,
+  verified_at: z.string().optional(),
+});
+export type ChecklistItem = z.infer<typeof ChecklistItem>;
+
+// Checklist
+export const Checklist = z.object({
+  goal_id: z.string(),
+  items: z.array(ChecklistItem),
+  created_at: z.string(),
+  updated_at: z.string(),
+});
+export type Checklist = z.infer<typeof Checklist>;
 
 // State Vector Element
 export const StateVectorElement = z.object({
@@ -53,7 +84,7 @@ export const Goal = z.object({
   title: z.string(),
   description: z.string().default(''),
   type: GoalType.default('dissatisfaction'),
-  achievement_thresholds: z.record(z.string(), z.number()).default({ progress: 0.9 }),
+  achievement_thresholds: z.record(z.string(), z.number()).default({}),
   deadline: z.string().nullable().default(null),
   state_vector: z.record(z.string(), StateVectorElement).default({}),
   gaps: z.array(Gap).default([]),
@@ -63,6 +94,9 @@ export const Goal = z.object({
   status: GoalStatus.default('active'),
   created_at: z.string().default(() => new Date().toISOString()),
   parent_goal_id: z.string().nullable().default(null),
+  refined: z.boolean().default(false),
+  completion_criteria: z.string().optional(),
+  checklist_created: z.boolean().default(false),
 });
 export type Goal = z.infer<typeof Goal>;
 

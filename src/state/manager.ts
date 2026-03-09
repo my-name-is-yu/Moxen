@@ -10,7 +10,7 @@ import {
 } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { MotiveState, Goal } from './models.js';
+import { MotiveState, Goal, Checklist } from './models.js';
 import { debug } from '../debug.js';
 
 export class StateManager {
@@ -23,7 +23,7 @@ export class StateManager {
 
   constructor(projectRoot: string) {
     this.projectRoot = projectRoot;
-    this.motiveDir = join(projectRoot, '.motive');
+    this.motiveDir = join(projectRoot, '.motiva');
     this.goalsDir = join(this.motiveDir, 'goals');
     this.statePath = join(this.motiveDir, 'state.json');
     this.logPath = join(this.motiveDir, 'log.jsonl');
@@ -67,10 +67,29 @@ export class StateManager {
     this.atomicWrite(path, JSON.stringify(goal, null, 2));
   }
 
+  checklistPath(goalId: string): string {
+    return join(this.goalsDir, `${goalId}-checklist.json`);
+  }
+
+  loadChecklist(goalId: string): Checklist | null {
+    const filePath = this.checklistPath(goalId);
+    if (!existsSync(filePath)) return null;
+    try {
+      return Checklist.parse(JSON.parse(readFileSync(filePath, 'utf-8')));
+    } catch {
+      return null;
+    }
+  }
+
+  saveChecklist(checklist: Checklist): void {
+    const filePath = this.checklistPath(checklist.goal_id);
+    this.atomicWrite(filePath, JSON.stringify(checklist, null, 2));
+  }
+
   listGoals(): Goal[] {
     if (!existsSync(this.goalsDir)) return [];
     return readdirSync(this.goalsDir)
-      .filter(f => f.endsWith('.json'))
+      .filter(f => f.endsWith('.json') && !f.endsWith('-checklist.json'))
       .sort()
       .map(f => Goal.parse(JSON.parse(readFileSync(join(this.goalsDir, f), 'utf-8'))));
   }

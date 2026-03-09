@@ -1,10 +1,38 @@
-import { Goal, Gap } from '../state/models.js';
+import { Goal, Gap, Checklist } from '../state/models.js';
 import { debug } from '../debug.js';
 
 const INVERSE_DIMENSIONS = new Set(['open_issues']);
 
 export class GapAnalysisEngine {
-  computeGaps(goal: Goal): Gap[] {
+  computeGaps(goal: Goal, checklist?: Checklist): Gap[] {
+    // Checklist-aware path
+    if (checklist) {
+      const gaps: Gap[] = [];
+      for (const item of checklist.items) {
+        if (item.status === 'verified') {
+          // No gap — item is fully verified
+          continue;
+        }
+        if (item.status === 'self_verified') {
+          // Partial credit — small residual gap
+          gaps.push({ dimension: `checklist:${item.id}`, current: 0, target: 1, magnitude: 0.2, confidence: 1.0 });
+        } else {
+          // pending or failed — full gap
+          gaps.push({ dimension: `checklist:${item.id}`, current: 0, target: 1, magnitude: 1.0, confidence: 1.0 });
+        }
+      }
+      debug('gap-analysis', 'checklist gaps computed', { goal_id: goal.id, gaps_count: gaps.length });
+      return gaps;
+    }
+
+    // No checklist and no explicit thresholds — emit sentinel gap
+    if (goal.checklist_created === false && Object.keys(goal.achievement_thresholds).length === 0) {
+      const gap: Gap = { dimension: 'checklist_missing', current: 0, target: 1, magnitude: 1.0, confidence: 1.0 };
+      debug('gap-analysis', 'checklist missing gap emitted', { goal_id: goal.id });
+      return [gap];
+    }
+
+    // Fallback: threshold-based gap analysis
     const gaps: Gap[] = [];
     const thresholdCount = Object.keys(goal.achievement_thresholds).length;
     debug('gap-analysis', 'computing gaps', { goal_id: goal.id, threshold_dimensions: thresholdCount });
@@ -40,14 +68,14 @@ export class GapAnalysisEngine {
     return sorted;
   }
 
-  maxGapScore(goal: Goal): number {
-    const gaps = this.computeGaps(goal);
+  maxGapScore(goal: Goal, checklist?: Checklist): number {
+    const gaps = this.computeGaps(goal, checklist);
     if (gaps.length === 0) return 0;
     return Math.max(...gaps.map(g => g.magnitude * g.confidence));
   }
 
-  isGoalSatisfied(goal: Goal, threshold = 0.05): boolean {
-    const gaps = this.computeGaps(goal);
+  isGoalSatisfied(goal: Goal, threshold = 0.05, checklist?: Checklist): boolean {
+    const gaps = this.computeGaps(goal, checklist);
     return gaps.every(g => g.magnitude <= threshold);
   }
 }

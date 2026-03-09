@@ -83,12 +83,16 @@ export function buildInjectedContext(goal: Goal): string {
 
   const lines: string[] = [
     '',
-    '[Motive] Active goal context:',
+    '[Motiva] Active goal context:',
     `  Goal: ${goal.title}${progressStr}`,
   ];
 
   if (goal.deadline) {
     lines.push(`  Deadline: ${goal.deadline}`);
+  }
+
+  if (goal.completion_criteria) {
+    lines.push(`  Completion criteria: ${goal.completion_criteria}`);
   }
 
   if (topTask) {
@@ -104,7 +108,7 @@ export function buildInjectedContext(goal: Goal): string {
 export function buildReminderContext(goals: Goal[]): string {
   if (goals.length === 0) return '';
   const top = goals.reduce((a, b) => (a.motivation_score >= b.motivation_score ? a : b));
-  return `\n[Motive] Reminder: current top goal is "${top.title}". Consider whether this prompt advances it.`;
+  return `\n[Motiva] Reminder: current top goal is "${top.title}". Consider whether this prompt advances it.`;
 }
 
 // ---------------------------------------------------------------------------
@@ -145,7 +149,7 @@ export function run(
       output: { prompt: input.prompt },
       exitCode: 2,
       stderrMessage:
-        `[Motive] Prompt blocked: strict_goal_alignment is enabled. ` +
+        `[Motiva] Prompt blocked: strict_goal_alignment is enabled. ` +
         `Active goals: ${goalList || '(none)'}. ` +
         `Please relate your prompt to an active goal or disable strict mode.`,
     };
@@ -168,7 +172,7 @@ export function run(
 if (process.argv[1] && process.argv[1].endsWith('user-prompt.js')) {
   const raw = readFileSync('/dev/stdin', 'utf-8');
   const input = JSON.parse(raw) as { prompt: string };
-  const projectRoot = process.env.MOTIVE_PROJECT_ROOT ?? process.cwd();
+  const projectRoot = process.env.MOTIVA_PROJECT_ROOT ?? process.cwd();
   const { output, exitCode, stderrMessage } = run(input, projectRoot);
   if (stderrMessage) process.stderr.write(stderrMessage + '\n');
   process.stdout.write(JSON.stringify(output) + '\n');

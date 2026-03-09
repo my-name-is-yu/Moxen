@@ -5,7 +5,7 @@ import { CuriosityEngine } from '../../src/engines/curiosity.js';
 import { Goal, MotiveState } from '../../src/state/models.js';
 
 const TEST_WORKDIR = join(process.cwd(), 'tmp-curiosity-test');
-const MOTIVE_DIR = join(TEST_WORKDIR, '.motive');
+const MOTIVE_DIR = join(TEST_WORKDIR, '.motiva');
 const PATTERNS_PATH = join(MOTIVE_DIR, 'patterns.json');
 
 function makeState(overrides: Partial<MotiveState> = {}): MotiveState {

@@ -27,11 +27,22 @@ export class SatisficingEngine {
    * - Otherwise → in_progress (continue)
    */
   judgeCompletion(gaps: Gap[]): CompletionJudgment {
+    // Checklist not yet created — always require verification before completion
+    if (gaps.some(g => g.dimension === 'checklist_missing')) {
+      const result = {
+        status: 'needs_verification' as CompletionStatus,
+        action: 'generate_verification_tasks' as CompletionAction,
+        reason: 'No checklist exists for this goal. Create a checklist before marking it complete.',
+      };
+      debug('satisficing', 'checklist missing', { status: result.status });
+      return result;
+    }
+
     if (gaps.length === 0) {
       const result = {
         status: 'completed' as CompletionStatus,
         action: 'mark_done' as CompletionAction,
-        reason: 'No dimensions to evaluate — goal is trivially complete.',
+        reason: 'All checklist items verified — goal is complete.',
       };
       debug('satisficing', 'threshold check', { gaps_count: 0, status: result.status });
       return result;

@@ -41,12 +41,12 @@ describe('motive setup — fresh project', () => {
   it('creates .motive/ directory', () => {
     const result = runSetup(['--project-root', tmpDir]);
     expect(result.status).toBe(0);
-    expect(existsSync(join(tmpDir, '.motive'))).toBe(true);
+    expect(existsSync(join(tmpDir, '.motiva'))).toBe(true);
   });
 
   it('creates .motive/state.json', () => {
     runSetup(['--project-root', tmpDir]);
-    expect(existsSync(join(tmpDir, '.motive', 'state.json'))).toBe(true);
+    expect(existsSync(join(tmpDir, '.motiva', 'state.json'))).toBe(true);
   });
 
   it('creates .claude/settings.json with motiva hooks', () => {
@@ -58,12 +58,15 @@ describe('motive setup — fresh project', () => {
     expect(settings.hooks).toBeDefined();
     expect(Array.isArray(settings.hooks['SessionStart'])).toBe(true);
     expect(settings.hooks['SessionStart'].length).toBeGreaterThan(0);
-    expect(settings.hooks['SessionStart'][0].type).toBe('command');
-    expect(settings.hooks['SessionStart'][0].command).toContain('session-start.js');
-    expect(settings.hooks['SessionStart'][0].command).toContain('MOTIVE_PROJECT_ROOT=');
+    // The CLI writes entries as { hooks: [{ type, command }] }
+    const sessionStartEntry = settings.hooks['SessionStart'][0];
+    expect(Array.isArray(sessionStartEntry.hooks)).toBe(true);
+    expect(sessionStartEntry.hooks[0].type).toBe('command');
+    expect(sessionStartEntry.hooks[0].command).toContain('session-start.js');
+    expect(sessionStartEntry.hooks[0].command).toContain('MOTIVA_PROJECT_ROOT=');
 
-    // All 6 hook events must be present
-    for (const event of ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolFailure', 'Stop']) {
+    // All 5 hook events must be present (PostToolFailure is not in HOOK_EVENTS list)
+    for (const event of ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop']) {
       expect(Array.isArray(settings.hooks[event])).toBe(true);
       expect(settings.hooks[event].length).toBeGreaterThan(0);
     }
@@ -78,8 +81,8 @@ describe('motive setup — fresh project', () => {
     runSetup(['--project-root', tmpDir]);
     const content = readFileSync(join(tmpDir, '.claude', 'rules', 'motiva-usage.md'), 'utf-8');
     expect(content).toContain('Motiva');
-    expect(content).toContain('motive status');
-    expect(content).toContain('motive goals');
+    expect(content).toContain('motiva status');
+    expect(content).toContain('motiva goals');
   });
 
   it('exits with status 0 on success', () => {
@@ -118,9 +121,11 @@ describe('motive setup — merge behavior (pre-existing settings.json)', () => {
       command: 'echo pre-existing-hook',
     });
 
-    // Motiva hook must also be there
+    // Motiva hook must also be there (CLI writes { hooks: [{ type, command }] } wrapper)
     const motivaPreToolUse = updated.hooks['PreToolUse'].find(
-      (e: { command?: string }) => typeof e.command === 'string' && e.command.includes('pre-tool-use.js')
+      (e: { hooks?: { command?: string }[] }) =>
+        Array.isArray(e.hooks) &&
+        e.hooks.some((h) => typeof h.command === 'string' && h.command.includes('pre-tool-use.js'))
     );
     expect(motivaPreToolUse).toBeDefined();
 
@@ -135,13 +140,10 @@ describe('motive setup — merge behavior (pre-existing settings.json)', () => {
     const settingsPath = join(tmpDir, '.claude', 'settings.json');
     const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
 
-    for (const event of ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolFailure', 'Stop']) {
-      const motivaEntries = settings.hooks[event].filter(
-        (e: { command?: string }) => typeof e.command === 'string' && e.command.includes('session-start.js')
-          || (typeof e.command === 'string' && e.command.includes(event.toLowerCase().replace('tooluse', '-tool-use').replace('tooluse', '-tool-use')))
-      );
-      // At most one motiva entry per event
-      expect(settings.hooks[event].length).toBeLessThanOrEqual(2); // pre-existing + motiva
+    // Only the 5 events in HOOK_EVENTS are registered
+    for (const event of ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'Stop']) {
+      // Each event should have exactly one motiva wrapper entry after two setup calls
+      expect(settings.hooks[event].length).toBe(1);
     }
   });
 
@@ -182,8 +184,11 @@ describe('motive setup -- --force flag', () => {
     const settings = JSON.parse(readFileSync(settingsPath, 'utf-8'));
 
     // Each event should have exactly one motiva hook entry after --force
+    // CLI writes { hooks: [{ type, command }] } wrapper objects
     const sessionStartEntries = settings.hooks['SessionStart'].filter(
-      (e: { command?: string }) => typeof e.command === 'string' && e.command.includes('session-start.js')
+      (e: { hooks?: { command?: string }[] }) =>
+        Array.isArray(e.hooks) &&
+        e.hooks.some((h) => typeof h.command === 'string' && h.command.includes('session-start.js'))
     );
     expect(sessionStartEntries.length).toBe(1);
   });

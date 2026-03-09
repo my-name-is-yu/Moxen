@@ -83,7 +83,7 @@ describe('Scenario 1: Full session lifecycle (happy path)', () => {
     expect(existsSync(startResult.contextPath)).toBe(true);
 
     const motiveContent = readFileSync(startResult.contextPath, 'utf-8');
-    expect(motiveContent).toContain('# Motive Context');
+    expect(motiveContent).toContain('# Motiva Context');
     expect(motiveContent).toContain('Write integration tests');
 
     // Verify session_id was persisted
@@ -97,7 +97,7 @@ describe('Scenario 1: Full session lifecycle (happy path)', () => {
     );
 
     expect(promptResult.exitCode).toBe(0);
-    expect(promptResult.output.prompt).toContain('[Motive] Active goal context:');
+    expect(promptResult.output.prompt).toContain('[Motiva] Active goal context:');
     expect(promptResult.output.prompt).toContain('Write integration tests');
 
     // 3. PreToolUse — safe Write action passes
@@ -119,8 +119,8 @@ describe('Scenario 1: Full session lifecycle (happy path)', () => {
 
     const goalAfterWrite = manager.loadGoal(goal.id);
     expect(goalAfterWrite).not.toBeNull();
-    // progress should have been bumped by the Write heuristic
-    expect(goalAfterWrite!.state_vector['progress']!.value).toBeGreaterThan(0.1);
+    // progress is now driven by checklist verification, not by Write heuristic
+    expect(goalAfterWrite!.state_vector['progress']!.value).toBeGreaterThanOrEqual(0.1);
 
     // 5. PostToolUse — test run with all-passing output, verify quality_score updated
     const postTestResult = await processPostToolUse(
@@ -187,7 +187,7 @@ describe('Scenario 2: Irreversible action blocking', () => {
 
     expect(result.exitCode).toBe(2);
     expect(result.stderrMessage).toBeDefined();
-    expect(result.stderrMessage).toContain('[Motive] Blocked');
+    expect(result.stderrMessage).toContain('[Motiva] Blocked');
     expect(result.stderrMessage).toContain('Bash');
   });
 
@@ -203,7 +203,7 @@ describe('Scenario 2: Irreversible action blocking', () => {
 
     expect(result.exitCode).toBe(2);
     expect(result.stderrMessage).toBeDefined();
-    expect(result.stderrMessage).toContain('[Motive] Blocked');
+    expect(result.stderrMessage).toContain('[Motiva] Blocked');
   });
 
   it('allows safe Write operations', () => {
@@ -370,7 +370,7 @@ describe('Scenario 4: Multi-goal priority switching', () => {
 
     // motive.md should be written and contain at least one goal title
     const motiveContent = readFileSync(startResult.contextPath, 'utf-8');
-    expect(motiveContent).toContain('# Motive Context');
+    expect(motiveContent).toContain('# Motiva Context');
     // Either goal title should appear in the context
     const hasGoal1 = motiveContent.includes('Urgent deadline task');
     const hasGoal2 = motiveContent.includes('Quality improvement task');
@@ -651,8 +651,8 @@ describe('Scenario 6: Learning pipeline', () => {
   it('CuriosityEngine.checkActivation suggests retry goals when failures are old enough', () => {
     const tmpDir2 = makeTmpDir('curiosity');
     try {
-      // Create .motive directory and write a patterns.json with an old failure
-      const motiveDir = join(tmpDir2, '.motive');
+      // Create .motiva directory and write a patterns.json with an old failure
+      const motiveDir = join(tmpDir2, '.motiva');
       mkdirSync(motiveDir, { recursive: true });
 
       const oldDate = new Date(Date.now() - 48 * 60 * 60 * 1000).toISOString(); // 48 h ago

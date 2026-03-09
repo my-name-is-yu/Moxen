@@ -85,7 +85,7 @@ export function run(input: PreToolUseInput): PreToolUseResult {
     return {
       exitCode: 2,
       stderrMessage:
-        `[Motive] Blocked: irreversible action detected in ${tool_name} call.\n` +
+        `[Motiva] Blocked: irreversible action detected in ${tool_name} call.\n` +
         `  Matched pattern: ${matched}\n` +
         `  Please perform this action manually after human review.`,
     };
@@ -106,7 +106,7 @@ export function run(input: PreToolUseInput): PreToolUseResult {
       return {
         exitCode: 2,
         stderrMessage:
-          `[Motive] Blocked: suspicious path traversal detected in ${tool_name}.\n` +
+          `[Motiva] Blocked: suspicious path traversal detected in ${tool_name}.\n` +
           `  Path: ${filePath}`,
       };
     }

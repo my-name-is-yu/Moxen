@@ -2,7 +2,10 @@ import { StateManager } from '../state/manager.js';
 import { GapAnalysisEngine } from '../engines/gap-analysis.js';
 import { SatisficingEngine } from '../engines/satisficing.js';
 import { StallDetectionEngine } from '../engines/stall-detection.js';
+import { VerificationRunner, calculateProgress } from '../engines/verification.js';
 import type { Goal, StateVectorElement } from '../state/models.js';
+import type { Checklist } from '../state/models.js';
+import { Checklist as ChecklistSchema } from '../state/models.js';
 import { debug } from '../debug.js';
 
 export interface PostToolUseInput {
@@ -32,7 +35,9 @@ function hasErrorOutput(output: string): boolean {
   return ERROR_PATTERNS.some(p => p.test(output));
 }
 
-// Heuristics: return a partial state vector update based on tool type and output
+// Heuristics: return a partial state vector update based on tool type and output.
+// NOTE: Write/Edit no longer produce a progress bump here — progress is now
+// driven exclusively by checklist verification via VerificationRunner.
 function deriveStateUpdates(
   input: PostToolUseInput,
 ): Record<string, Partial<StateVectorElement>> {
@@ -77,18 +82,6 @@ function deriveStateUpdates(
     }
   }
 
-  // Write / Edit → increment progress slightly (0.05 bump, capped at goal's target)
-  if (toolName === 'Write' || toolName === 'Edit') {
-    updates['progress'] = {
-      // sentinel: merge with existing value in the caller
-      value: 0.05,
-      confidence: 0.6,
-      observed_at: now,
-      source: 'tool_output',
-      observation_method: 'file_write_heuristic',
-    };
-  }
-
   // Any tool with error output → note in state
   if (hasError) {
     updates['last_error'] = {
@@ -104,9 +97,8 @@ function deriveStateUpdates(
 }
 
 // Merge derived updates into the goal's state_vector.
-// For 'progress', adds to existing value instead of replacing, and preserves
-// the higher confidence (don't downgrade a high-confidence existing observation
-// with a heuristic patch that has lower confidence).
+// Progress is now set absolutely (not additively); all other dimensions use
+// the normal merge (existing fields preserved, patch fields overwrite).
 function applyStateUpdates(
   goal: Goal,
   updates: Record<string, Partial<StateVectorElement>>,
@@ -114,17 +106,7 @@ function applyStateUpdates(
   for (const [dim, patch] of Object.entries(updates)) {
     const existing = goal.state_vector[dim];
 
-    if (dim === 'progress' && existing) {
-      // Additive bump: clamp to [0, 1]. Preserve the higher confidence.
-      goal.state_vector[dim] = {
-        ...existing,
-        observed_at: patch.observed_at ?? new Date().toISOString(),
-        source: patch.source ?? existing.source,
-        observation_method: patch.observation_method ?? existing.observation_method,
-        confidence: Math.max(existing.confidence, patch.confidence ?? 0),
-        value: Math.min(1.0, existing.value + (patch.value ?? 0)),
-      };
-    } else if (existing) {
+    if (existing) {
       goal.state_vector[dim] = { ...existing, ...patch };
     } else {
       // New dimension — fill required fields with defaults
@@ -137,6 +119,49 @@ function applyStateUpdates(
       };
     }
   }
+}
+
+/**
+ * Apply an absolute progress value to a goal's state vector.
+ * This replaces any existing progress value rather than adding to it.
+ */
+function applyAbsoluteProgress(goal: Goal, progress: number, now: string): void {
+  const existing = goal.state_vector['progress'];
+  goal.state_vector['progress'] = {
+    // preserve any extra fields from an existing entry, then override with new values
+    ...(existing ?? {}),
+    value: Math.min(1.0, Math.max(0.0, progress)),
+    confidence: 0.85,
+    observed_at: now,
+    source: 'tool_output',
+    observation_method: 'checklist_verification',
+  };
+}
+
+/**
+ * Resolve the project root from a file path written by the agent.
+ *
+ * The .motiva directory sits at the project root; if the written file is
+ * inside `.motiva/goals/` we can walk up two levels.  For any other file we
+ * fall back to the provided `fallbackRoot`.
+ */
+function resolveProjectRoot(filePath: string | undefined, fallbackRoot: string): string {
+  if (!filePath) return fallbackRoot;
+  // e.g. /some/project/.motive/goals/goal-abc-checklist.json
+  //   → /some/project
+  const motive = filePath.lastIndexOf('/.motiva/');
+  if (motive !== -1) return filePath.slice(0, motive);
+  return fallbackRoot;
+}
+
+/**
+ * Detect whether a Write tool call targets a checklist file inside the
+ * `.motiva/goals/` directory.
+ */
+function isChecklistWrite(toolName: string, toolInput: Record<string, unknown>): boolean {
+  if (toolName !== 'Write') return false;
+  const filePath = typeof toolInput['file_path'] === 'string' ? toolInput['file_path'] : '';
+  return /[/\\]\.motiva[/\\]goals[/\\][^/\\]+-checklist\.json$/.test(filePath);
 }
 
 export async function processPostToolUse(
@@ -164,29 +189,164 @@ export async function processPostToolUse(
   const hasError = hasErrorOutput(input.tool_output ?? '');
   debug('post-tool-use', 'tool result', { tool_name: input.tool_name, has_error: hasError, state_updates: Object.keys(stateUpdates) });
 
+  const toolName = input.tool_name;
+  const toolInput = input.tool_input ?? {};
+  const now = new Date().toISOString();
+
   const goals = manager.loadActiveGoals();
   const goalsCompleted: string[] = [];
   const stallResetsApplied: string[] = [];
 
-  for (const goal of goals) {
-    // Apply heuristic state updates
-    applyStateUpdates(goal, stateUpdates);
+  // ------------------------------------------------------------------
+  // Case A: Agent writes a checklist file
+  // ------------------------------------------------------------------
+  if (isChecklistWrite(toolName, toolInput)) {
+    const filePath = typeof toolInput['file_path'] === 'string' ? toolInput['file_path'] : '';
+    const detectedRoot = resolveProjectRoot(filePath, root);
+    const verifier = new VerificationRunner(detectedRoot, 200);
 
-    // Recompute gaps
-    goal.gaps = gapEngine.computeGaps(goal);
+    try {
+      // Parse the content the agent wrote
+      const rawContent = typeof toolInput['content'] === 'string' ? toolInput['content'] : '';
+      const parsedChecklist = ChecklistSchema.parse(JSON.parse(rawContent)) as Checklist;
 
-    // Check completion
-    const judgment = satisficingEngine.judgeCompletion(goal.gaps);
-    if (judgment.status === 'completed') {
-      goal.status = 'completed';
-      goalsCompleted.push(goal.id);
-      debug('post-tool-use', 'gap updates: goal completed', { goal_id: goal.id, judgment: judgment.reason });
+      // Mark the matching goal as having a checklist
+      const matchingGoal = goals.find(g => g.id === parsedChecklist.goal_id);
+      if (matchingGoal) {
+        matchingGoal.checklist_created = true;
+        manager.saveGoal(matchingGoal);
+      }
 
-      // Remove from active list
-      state.active_goal_ids = state.active_goal_ids.filter(id => id !== goal.id);
+      // Verify all items and compute progress
+      const verifiedItems = verifier.verifyAll(parsedChecklist.items);
+      const progress = calculateProgress(verifiedItems);
+
+      // Persist updated checklist
+      const updatedChecklist: Checklist = {
+        ...parsedChecklist,
+        items: verifiedItems,
+        updated_at: now,
+      };
+      manager.saveChecklist(updatedChecklist);
+
+      debug('post-tool-use', 'checklist write processed', {
+        goal_id: parsedChecklist.goal_id,
+        items: verifiedItems.length,
+        progress,
+      });
+
+      // Apply progress to the matching goal
+      if (matchingGoal) {
+        applyAbsoluteProgress(matchingGoal, progress, now);
+        applyStateUpdates(matchingGoal, stateUpdates);
+        matchingGoal.gaps = gapEngine.computeGaps(matchingGoal);
+        const judgment = satisficingEngine.judgeCompletion(matchingGoal.gaps);
+        if (judgment.status === 'completed') {
+          matchingGoal.status = 'completed';
+          goalsCompleted.push(matchingGoal.id);
+          state.active_goal_ids = state.active_goal_ids.filter(id => id !== matchingGoal.id);
+          debug('post-tool-use', 'goal completed after checklist write', { goal_id: matchingGoal.id });
+        }
+        manager.saveGoal(matchingGoal);
+      }
+
+      // Update remaining goals (no progress change — apply other state updates only)
+      for (const goal of goals) {
+        if (matchingGoal && goal.id === matchingGoal.id) continue;
+        applyStateUpdates(goal, stateUpdates);
+        goal.gaps = gapEngine.computeGaps(goal);
+        const judgment = satisficingEngine.judgeCompletion(goal.gaps);
+        if (judgment.status === 'completed') {
+          goal.status = 'completed';
+          goalsCompleted.push(goal.id);
+          state.active_goal_ids = state.active_goal_ids.filter(id => id !== goal.id);
+        }
+        manager.saveGoal(goal);
+      }
+    } catch (err) {
+      debug('post-tool-use', 'checklist write failed — falling through to normal path', { err: String(err) });
+      // Fall through: treat as a normal file write below
+      for (const goal of goals) {
+        applyStateUpdates(goal, stateUpdates);
+        goal.gaps = gapEngine.computeGaps(goal);
+        const judgment = satisficingEngine.judgeCompletion(goal.gaps);
+        if (judgment.status === 'completed') {
+          goal.status = 'completed';
+          goalsCompleted.push(goal.id);
+          state.active_goal_ids = state.active_goal_ids.filter(id => id !== goal.id);
+        }
+        manager.saveGoal(goal);
+      }
     }
+  }
 
-    manager.saveGoal(goal);
+  // ------------------------------------------------------------------
+  // Case B / C: Write/Edit on a regular file, or any other tool
+  // ------------------------------------------------------------------
+  else if ((toolName === 'Write' || toolName === 'Edit') && goals.some(g => g.checklist_created)) {
+    // Case B: at least one goal has a checklist — re-verify and update progress
+    const detectedRoot = resolveProjectRoot(
+      typeof toolInput['file_path'] === 'string' ? toolInput['file_path'] : undefined,
+      root,
+    );
+    const verifier = new VerificationRunner(detectedRoot, 200);
+
+    for (const goal of goals) {
+      applyStateUpdates(goal, stateUpdates);
+
+      if (goal.checklist_created) {
+        try {
+          const checklist = manager.loadChecklist(goal.id);
+          if (checklist) {
+            // Skip bash verification on Write/Edit hot path (reserved for `motiva verify`)
+            const nonBashItems = checklist.items.filter(i => i.verification.type !== 'bash');
+            const bashItems = checklist.items.filter(i => i.verification.type === 'bash');
+            const verifiedNonBash = verifier.verifyAll(nonBashItems);
+            const verifiedItems = [...verifiedNonBash, ...bashItems];
+            const progress = calculateProgress(verifiedItems);
+
+            const updatedChecklist: Checklist = {
+              ...checklist,
+              items: verifiedItems,
+              updated_at: now,
+            };
+            manager.saveChecklist(updatedChecklist);
+
+            applyAbsoluteProgress(goal, progress, now);
+            debug('post-tool-use', 'checklist re-verified', { goal_id: goal.id, progress });
+          }
+        } catch (err) {
+          debug('post-tool-use', 'checklist re-verification failed', { goal_id: goal.id, err: String(err) });
+          // Progress not updated — leave as-is
+        }
+      }
+      // Case C (no checklist for this goal): no progress update at all
+
+      goal.gaps = gapEngine.computeGaps(goal);
+      const judgment = satisficingEngine.judgeCompletion(goal.gaps);
+      if (judgment.status === 'completed') {
+        goal.status = 'completed';
+        goalsCompleted.push(goal.id);
+        state.active_goal_ids = state.active_goal_ids.filter(id => id !== goal.id);
+        debug('post-tool-use', 'goal completed', { goal_id: goal.id, judgment: judgment.reason });
+      }
+
+      manager.saveGoal(goal);
+    }
+  } else {
+    // Any other tool (Bash, Read, etc.) or Write/Edit with no checklists at all
+    for (const goal of goals) {
+      applyStateUpdates(goal, stateUpdates);
+      goal.gaps = gapEngine.computeGaps(goal);
+      const judgment = satisficingEngine.judgeCompletion(goal.gaps);
+      if (judgment.status === 'completed') {
+        goal.status = 'completed';
+        goalsCompleted.push(goal.id);
+        state.active_goal_ids = state.active_goal_ids.filter(id => id !== goal.id);
+        debug('post-tool-use', 'goal completed', { goal_id: goal.id, judgment: judgment.reason });
+      }
+      manager.saveGoal(goal);
+    }
   }
 
   // On success (no error), reset stall counters for this tool

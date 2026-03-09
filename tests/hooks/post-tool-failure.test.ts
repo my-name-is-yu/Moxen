@@ -211,7 +211,7 @@ describe('post-tool-failure: logging', () => {
   it('appends an entry to log.jsonl on each failure', async () => {
     await processPostToolFailure({ tool_name: 'Bash', error: 'exit code 1' }, tmpRoot);
 
-    const logPath = join(tmpRoot, '.motive', 'log.jsonl');
+    const logPath = join(tmpRoot, '.motiva', 'log.jsonl');
     expect(existsSync(logPath)).toBe(true);
     const lines = readFileSync(logPath, 'utf-8').trim().split('\n');
     const entry = JSON.parse(lines[lines.length - 1]);
@@ -225,7 +225,7 @@ describe('post-tool-failure: logging', () => {
     await processPostToolFailure({ tool_name: 'Bash' }, tmpRoot);
     await processPostToolFailure({ tool_name: 'Bash' }, tmpRoot);
 
-    const logPath = join(tmpRoot, '.motive', 'log.jsonl');
+    const logPath = join(tmpRoot, '.motiva', 'log.jsonl');
     const lines = readFileSync(logPath, 'utf-8').trim().split('\n');
     const lastEntry = JSON.parse(lines[lines.length - 1]);
     expect(lastEntry.stall_detected).toBe(true);
@@ -234,7 +234,7 @@ describe('post-tool-failure: logging', () => {
   it('log entry includes stall_detected=false when no stall', async () => {
     await processPostToolFailure({ tool_name: 'Bash' }, tmpRoot);
 
-    const logPath = join(tmpRoot, '.motive', 'log.jsonl');
+    const logPath = join(tmpRoot, '.motiva', 'log.jsonl');
     const lines = readFileSync(logPath, 'utf-8').trim().split('\n');
     const lastEntry = JSON.parse(lines[lines.length - 1]);
     expect(lastEntry.stall_detected).toBe(false);
@@ -248,7 +248,7 @@ describe('post-tool-failure: logging', () => {
 describe('post-tool-failure: edge cases', () => {
   it('works when no state file exists yet (fresh project)', async () => {
     // init() already created state; remove state file to simulate fresh project
-    const stateFile = join(tmpRoot, '.motive', 'state.json');
+    const stateFile = join(tmpRoot, '.motiva', 'state.json');
     unlinkSync(stateFile);
 
     const result = await processPostToolFailure({ tool_name: 'Bash' }, tmpRoot);

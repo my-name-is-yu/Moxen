@@ -25,6 +25,7 @@ function makeGoal(overrides: Partial<Parameters<typeof Goal.parse>[0]> = {}): Go
     state_vector: {
       progress: { value: 0.4, confidence: 0.8, source: 'tool_output' },
     },
+    refined: true,
     ...overrides,
   });
 }
@@ -109,7 +110,7 @@ describe('processSessionStart', () => {
 
     expect(existsSync(result.contextPath)).toBe(true);
     const content = readFileSync(result.contextPath, 'utf-8');
-    expect(content).toContain('# Motive Context');
+    expect(content).toContain('# Motiva Context');
   });
 
   it('writes motive.md with goal title when goals exist', async () => {

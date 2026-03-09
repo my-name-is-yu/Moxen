@@ -36,7 +36,7 @@ export class CuriosityEngine {
   private readonly patternsPath: string;
 
   constructor(workdir = '.') {
-    this.patternsPath = join(workdir, '.motive', 'patterns.json');
+    this.patternsPath = join(workdir, '.motiva', 'patterns.json');
   }
 
   /**
@@ -105,7 +105,7 @@ export class CuriosityEngine {
   }
 
   /**
-   * Find failure areas in .motive/patterns.json that are eligible for retry.
+   * Find failure areas in .motiva/patterns.json that are eligible for retry.
    * A failure is eligible when retry_eligible=true and last_failed_at is older
    * than retryAfterHours.
    */
