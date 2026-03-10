@@ -72,7 +72,7 @@ function buildFeasibilityPrompt(
   dimension: string,
   description: string,
   baselineValue: number | string | boolean | null,
-  thresholdValue: number | string | boolean | null,
+  thresholdValue: number | string | boolean | (number | string)[] | null,
   timeHorizonDays: number
 ): string {
   return `Assess the feasibility of achieving this dimension target.
@@ -209,22 +209,28 @@ function decompositionToDimension(d: DimensionDecomposition): Dimension {
 
 function buildThreshold(
   thresholdType: "min" | "max" | "range" | "present" | "match",
-  thresholdValue: number | string | boolean | null
+  thresholdValue: number | string | boolean | (number | string)[] | null
 ): Dimension["threshold"] {
   switch (thresholdType) {
     case "min":
       return { type: "min", value: typeof thresholdValue === "number" ? thresholdValue : 0 };
     case "max":
       return { type: "max", value: typeof thresholdValue === "number" ? thresholdValue : 100 };
-    case "range":
+    case "range": {
+      if (Array.isArray(thresholdValue)) {
+        const low = typeof thresholdValue[0] === "number" ? thresholdValue[0] : 0;
+        const high = typeof thresholdValue[1] === "number" ? thresholdValue[1] : 100;
+        return { type: "range", low, high };
+      }
       return { type: "range", low: 0, high: typeof thresholdValue === "number" ? thresholdValue : 100 };
+    }
     case "present":
       return { type: "present" };
     case "match":
       return {
         type: "match",
         value:
-          thresholdValue !== null
+          thresholdValue !== null && !Array.isArray(thresholdValue)
             ? (thresholdValue as string | number | boolean)
             : "",
       };
@@ -737,7 +743,7 @@ export class GoalNegotiator {
     dimensionName: string,
     goalDescription: string,
     baselineValue: number | string | boolean | null,
-    thresholdValue: number | string | boolean | null,
+    thresholdValue: number | string | boolean | (number | string)[] | null,
     timeHorizonDays: number
   ): Promise<FeasibilityResult> {
     const prompt = buildFeasibilityPrompt(

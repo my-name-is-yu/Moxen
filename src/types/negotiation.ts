@@ -18,7 +18,7 @@ export const DimensionDecompositionSchema = z.object({
   name: z.string(),
   label: z.string(),
   threshold_type: z.enum(["min", "max", "range", "present", "match"]),
-  threshold_value: z.union([z.number(), z.string(), z.boolean()]).nullable(),
+  threshold_value: z.union([z.number(), z.string(), z.boolean(), z.array(z.union([z.number(), z.string()]))]).nullable(),
   observation_method_hint: z.string(),
 });
 export type DimensionDecomposition = z.infer<typeof DimensionDecompositionSchema>;

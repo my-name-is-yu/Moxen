@@ -1421,6 +1421,31 @@ describe("GoalNegotiator", () => {
       expect(result.goal.dimensions[0]!.threshold).toEqual({ type: "match", value: "deployed" });
     });
 
+    it("range threshold with array threshold_value creates correct structure", async () => {
+      const rangeDimension = JSON.stringify([
+        {
+          name: "response_time",
+          label: "Response Time",
+          threshold_type: "range",
+          threshold_value: [60, 80],
+          observation_method_hint: "Measure response time in ms",
+        },
+      ]);
+
+      const mockLLM = createMockLLMClient([
+        PASS_VERDICT,
+        rangeDimension,
+        FEASIBILITY_REALISTIC,
+        RESPONSE_MESSAGE_ACCEPT,
+      ]);
+
+      const ethicsGate = new EthicsGate(stateManager, mockLLM);
+      const negotiator = new GoalNegotiator(stateManager, mockLLM, ethicsGate, observationEngine);
+
+      const result = await negotiator.negotiate("Test goal");
+      expect(result.goal.dimensions[0]!.threshold).toEqual({ type: "range", low: 60, high: 80 });
+    });
+
     it("dimensions have initial null current_value", async () => {
       const mockLLM = createMockLLMClient([
         PASS_VERDICT,
