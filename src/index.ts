@@ -23,3 +23,9 @@ export {
 export { ObservationEngine } from "./observation-engine.js";
 export { StallDetector } from "./stall-detector.js";
 export { SatisficingJudge } from "./satisficing-judge.js";
+export type { ILLMClient, LLMMessage, LLMRequestOptions, LLMResponse } from "./llm-client.js";
+export { LLMClient, MockLLMClient } from "./llm-client.js";
+export { EthicsGate } from "./ethics-gate.js";
+export { SessionManager } from "./session-manager.js";
+export { StrategyManager } from "./strategy-manager.js";
+export { GoalNegotiator, EthicsRejectedError } from "./goal-negotiator.js";
