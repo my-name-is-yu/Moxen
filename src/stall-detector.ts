@@ -1,16 +1,18 @@
 import { StateManager } from "./state-manager.js";
 import { StallReportSchema, StallStateSchema } from "./types/stall.js";
 import type { StallReport, StallState } from "./types/stall.js";
+import type { CharacterConfig } from "./types/character.js";
+import { DEFAULT_CHARACTER_CONFIG } from "./types/character.js";
 
-// ─── Feedback category → N loops mapping ───
+// ─── Base feedback category → N loops mapping (at stall_flexibility=1, multiplier=1.0) ───
 
-const FEEDBACK_CATEGORY_N: Record<string, number> = {
+const BASE_FEEDBACK_CATEGORY_N: Record<string, number> = {
   immediate: 3,
   medium_term: 5,
   long_term: 10,
 };
 
-const DEFAULT_N = 5;
+const BASE_DEFAULT_N = 5;
 
 // ─── Time thresholds ───
 
@@ -43,9 +45,25 @@ const RECOVERY_SCHEDULE: Array<{ loops: number; factor: number }> = [
  */
 export class StallDetector {
   private readonly stateManager: StateManager;
+  private readonly characterConfig: CharacterConfig;
 
-  constructor(stateManager: StateManager) {
+  constructor(stateManager: StateManager, characterConfig?: CharacterConfig) {
     this.stateManager = stateManager;
+    this.characterConfig = characterConfig ?? DEFAULT_CHARACTER_CONFIG;
+  }
+
+  /**
+   * Return the adjusted N value for a given feedback category.
+   * stall_flexibility=1 (default, most flexible) → multiplier=1.0 (pivot fast)
+   * stall_flexibility=5 (most persistent) → multiplier=2.0
+   * Formula: multiplier = 0.75 + (stall_flexibility * 0.25)
+   */
+  private getAdjustedN(category?: string): number {
+    const multiplier = 0.75 + this.characterConfig.stall_flexibility * 0.25;
+    const base = category
+      ? (BASE_FEEDBACK_CATEGORY_N[category] ?? BASE_DEFAULT_N)
+      : BASE_DEFAULT_N;
+    return Math.round(base * multiplier);
   }
 
   // ─── Public Methods ───
@@ -60,9 +78,7 @@ export class StallDetector {
     gapHistory: Array<{ normalized_gap: number }>,
     feedbackCategory?: string
   ): StallReport | null {
-    const n = feedbackCategory
-      ? (FEEDBACK_CATEGORY_N[feedbackCategory] ?? DEFAULT_N)
-      : DEFAULT_N;
+    const n = this.getAdjustedN(feedbackCategory);
 
     if (gapHistory.length < n + 1) {
       // Not enough history to determine a stall
@@ -162,7 +178,7 @@ export class StallDetector {
   checkGlobalStall(
     goalId: string,
     allDimensionGaps: Map<string, Array<{ normalized_gap: number }>>,
-    loopThreshold = DEFAULT_N
+    loopThreshold = this.getAdjustedN()
   ): StallReport | null {
     if (allDimensionGaps.size === 0) {
       return null;

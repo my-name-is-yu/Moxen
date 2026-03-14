@@ -29,7 +29,29 @@ function getFreePort(): Promise<number> {
       const port = (srv.address() as { port: number }).port;
       srv.close((err) => (err ? reject(err) : resolve(port)));
     });
+    srv.on("error", reject);
   });
+}
+
+/** Start an EventServer, retrying with a new free port if EADDRINUSE. */
+async function startWithRetry(
+  driveSystem: ReturnType<typeof createMockDriveSystem>,
+  maxAttempts = 5
+): Promise<{ server: EventServer; port: number }> {
+  let lastErr: unknown;
+  for (let i = 0; i < maxAttempts; i++) {
+    const p = await getFreePort();
+    const s = new EventServer(driveSystem as never, { port: p });
+    try {
+      await s.start();
+      return { server: s, port: p };
+    } catch (err: unknown) {
+      lastErr = err;
+      if ((err as NodeJS.ErrnoException).code !== "EADDRINUSE") throw err;
+      // port was grabbed between getFreePort() and start(); retry
+    }
+  }
+  throw lastErr;
 }
 
 function postEvent(
@@ -312,9 +334,7 @@ describe("POST /events — invalid data", () => {
 describe("routing — wrong method or path", () => {
   beforeEach(async () => {
     // Re-acquire port to avoid EADDRINUSE from prior test teardown race
-    port = await getFreePort();
-    server = new EventServer(mockDriveSystem as never, { port });
-    await server.start();
+    ({ server, port } = await startWithRetry(mockDriveSystem));
   });
 
   it("GET /events returns 404", async () => {

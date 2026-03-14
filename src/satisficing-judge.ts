@@ -281,11 +281,21 @@ export class SatisficingJudge {
   /**
    * Propagate subgoal completion to the parent goal's matching dimension.
    *
-   * MVP: name-based matching only.
-   * Finds the first dimension whose name matches subgoalId (or contains it),
-   * and sets its current_value to the threshold value (fully satisfied).
+   * Phase 2: supports dimension_mapping for aggregation-based propagation.
+   * - If any subgoal dimension has dimension_mapping set, use aggregation path.
+   * - Mixed: mapped dimensions use aggregation; unmapped dimensions fall back to name matching.
+   * - Backwards compatible: if no dimensions have dimension_mapping, behaves like MVP.
+   *
+   * @param subgoalId The subgoal's ID (used for name matching in MVP path).
+   * @param parentGoalId The parent goal's ID to update.
+   * @param subgoalDimensions Optional subgoal dimensions for aggregation mapping.
+   *   When omitted, falls back to MVP name-based matching only.
    */
-  propagateSubgoalCompletion(subgoalId: string, parentGoalId: string): void {
+  propagateSubgoalCompletion(
+    subgoalId: string,
+    parentGoalId: string,
+    subgoalDimensions?: import("./types/goal.js").Dimension[]
+  ): void {
     const parentGoal = this.stateManager.loadGoal(parentGoalId);
     if (parentGoal === null) {
       throw new Error(
@@ -293,6 +303,107 @@ export class SatisficingJudge {
       );
     }
 
+    const now = new Date().toISOString();
+
+    // Phase 2: if subgoalDimensions are provided and any has dimension_mapping, use aggregation path
+    if (subgoalDimensions && subgoalDimensions.length > 0) {
+      const mappedDims = subgoalDimensions.filter((d) => d.dimension_mapping !== null);
+      const unmappedDims = subgoalDimensions.filter((d) => d.dimension_mapping === null);
+
+      // Process mapped dimensions: group by parent_dimension
+      const parentDimUpdates = new Map<string, number>();
+
+      if (mappedDims.length > 0) {
+        // Group subgoal dimensions by target parent_dimension
+        const grouped = new Map<string, import("./types/goal.js").Dimension[]>();
+        for (const dim of mappedDims) {
+          const mapping = dim.dimension_mapping!;
+          const existing = grouped.get(mapping.parent_dimension) ?? [];
+          existing.push(dim);
+          grouped.set(mapping.parent_dimension, existing);
+        }
+
+        // Compute aggregated value for each parent dimension
+        for (const [parentDimName, dims] of grouped) {
+          const aggregation = dims[0]!.dimension_mapping!.aggregation;
+
+          const numericValues: number[] = [];
+          const fulfillmentRatios: number[] = [];
+
+          for (const dim of dims) {
+            const cv = dim.current_value;
+            if (typeof cv === "number") {
+              numericValues.push(cv);
+            } else if (typeof cv === "boolean") {
+              numericValues.push(cv ? 1 : 0);
+            } else if (typeof cv === "string") {
+              const parsed = Number(cv);
+              if (!isNaN(parsed)) {
+                numericValues.push(parsed);
+              } else {
+                // Non-numeric in avg mode: skip with warning
+                if (aggregation === "avg") {
+                  console.warn(
+                    `propagateSubgoalCompletion: skipping non-numeric current_value "${cv}" for dimension "${dim.name}" in avg aggregation`
+                  );
+                }
+              }
+            }
+            // For all_required: also compute fulfillment ratio
+            if (aggregation === "all_required") {
+              const progress = this.computeActualProgress(dim);
+              fulfillmentRatios.push(progress);
+            }
+          }
+
+          const thresholds = dims.map((d) => {
+            const th = d.threshold;
+            if (th.type === "min") return th.value;
+            if (th.type === "max") return th.value;
+            if (th.type === "range") return th.high;
+            return 1;
+          });
+
+          const aggregated =
+            aggregation === "all_required"
+              ? aggregateValues(fulfillmentRatios, aggregation, thresholds)
+              : aggregateValues(numericValues, aggregation, thresholds);
+
+          parentDimUpdates.set(parentDimName, aggregated);
+        }
+      }
+
+      // Build updated dimensions array for the parent goal
+      let updatedDimensions = parentGoal.dimensions.map((d) => {
+        if (parentDimUpdates.has(d.name)) {
+          return { ...d, current_value: parentDimUpdates.get(d.name)!, last_updated: now };
+        }
+        return d;
+      });
+
+      // Process unmapped dimensions: fall back to name-based matching (MVP path)
+      for (const unmappedDim of unmappedDims) {
+        const matchedIndex = updatedDimensions.findIndex(
+          (d) => d.name === unmappedDim.name || d.name.includes(unmappedDim.name)
+        );
+        if (matchedIndex !== -1) {
+          const matchedDim = updatedDimensions[matchedIndex]!;
+          const satisfiedValue = getSatisfiedValue(matchedDim);
+          updatedDimensions = updatedDimensions.map((d, i) =>
+            i === matchedIndex ? { ...d, current_value: satisfiedValue, last_updated: now } : d
+          );
+        }
+      }
+
+      this.stateManager.saveGoal({
+        ...parentGoal,
+        dimensions: updatedDimensions,
+        updated_at: now,
+      });
+      return;
+    }
+
+    // MVP path: name-based matching (backwards compatible)
     const matchedDimIndex = parentGoal.dimensions.findIndex(
       (d) => d.name === subgoalId || d.name.includes(subgoalId)
     );
@@ -306,7 +417,6 @@ export class SatisficingJudge {
 
     // Set current_value to threshold value so isDimensionSatisfied returns true
     const satisfiedValue = getSatisfiedValue(matchedDim);
-    const now = new Date().toISOString();
 
     const updatedDimensions = parentGoal.dimensions.map((d, i) =>
       i === matchedDimIndex
@@ -319,6 +429,39 @@ export class SatisficingJudge {
       dimensions: updatedDimensions,
       updated_at: now,
     });
+  }
+}
+
+// ─── Pure Helper: aggregateValues ───
+
+/**
+ * Aggregate an array of numeric values using the specified strategy.
+ *
+ * @param values - Numeric values to aggregate.
+ * @param aggregation - Strategy: "min" | "avg" | "max" | "all_required".
+ * @param thresholds - For "all_required": fulfillment ratios are already computed (values = ratios).
+ * @returns Aggregated value, or 0 if values array is empty.
+ */
+export function aggregateValues(
+  values: number[],
+  aggregation: "min" | "avg" | "max" | "all_required",
+  thresholds?: number[]
+): number {
+  if (values.length === 0) return 0;
+
+  switch (aggregation) {
+    case "min":
+      return Math.min(...values);
+    case "max":
+      return Math.max(...values);
+    case "avg": {
+      const sum = values.reduce((acc, v) => acc + v, 0);
+      return sum / values.length;
+    }
+    case "all_required":
+      // values are fulfillment ratios (0..1); return the minimum ratio
+      // (parent is "complete" only if all ratios = 1.0, expressed as min)
+      return Math.min(...values);
   }
 }
 

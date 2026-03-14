@@ -19,6 +19,8 @@ import { parseArgs } from "node:util";
 
 import { StateManager } from "./state-manager.js";
 import { LLMClient } from "./llm-client.js";
+import { OllamaLLMClient } from "./ollama-client.js";
+import type { ILLMClient } from "./llm-client.js";
 import { TrustManager } from "./trust-manager.js";
 import { DriveSystem } from "./drive-system.js";
 import { ObservationEngine } from "./observation-engine.js";
@@ -37,6 +39,7 @@ import { CoreLoop } from "./core-loop.js";
 import { DaemonRunner } from "./daemon-runner.js";
 import { PIDManager } from "./pid-manager.js";
 import { Logger } from "./logger.js";
+import { CharacterConfigManager } from "./character-config.js";
 import * as GapCalculator from "./gap-calculator.js";
 import * as DriveScorer from "./drive-scorer.js";
 import type { GapCalculatorModule, DriveScorerModule, LoopConfig } from "./core-loop.js";
@@ -46,10 +49,12 @@ import type { Task } from "./types/task.js";
 
 export class CLIRunner {
   private readonly stateManager: StateManager;
+  private readonly characterConfigManager: CharacterConfigManager;
   private activeCoreLoop: CoreLoop | null = null;
 
   constructor(baseDir?: string) {
     this.stateManager = new StateManager(baseDir);
+    this.characterConfigManager = new CharacterConfigManager(this.stateManager);
   }
 
   /**
@@ -68,6 +73,21 @@ export class CLIRunner {
     return process.env.ANTHROPIC_API_KEY;
   }
 
+  /**
+   * Build the LLM client based on environment configuration.
+   * When MOTIVA_LLM_PROVIDER=ollama, returns an OllamaLLMClient.
+   * Otherwise returns a LLMClient (Anthropic).
+   */
+  private buildLLMClient(apiKey?: string): ILLMClient {
+    const provider = process.env.MOTIVA_LLM_PROVIDER;
+    if (provider === "ollama") {
+      const baseUrl = process.env.OLLAMA_BASE_URL ?? "http://localhost:11434";
+      const model = process.env.OLLAMA_MODEL ?? "qwen3:4b";
+      return new OllamaLLMClient({ baseUrl, model });
+    }
+    return new LLMClient(apiKey);
+  }
+
   private buildApprovalFn(rl: readline.Interface): (task: Task) => Promise<boolean> {
     return (task: Task): Promise<boolean> => {
       return new Promise((resolve) => {
@@ -83,13 +103,14 @@ export class CLIRunner {
     };
   }
 
-  private buildDeps(apiKey: string, config?: LoopConfig, approvalFn?: (task: Task) => Promise<boolean>) {
+  private buildDeps(apiKey: string | undefined, config?: LoopConfig, approvalFn?: (task: Task) => Promise<boolean>) {
     const stateManager = this.stateManager;
-    const llmClient = new LLMClient(apiKey);
+    const characterConfig = this.characterConfigManager.load();
+    const llmClient = this.buildLLMClient(apiKey);
     const trustManager = new TrustManager(stateManager);
     const driveSystem = new DriveSystem(stateManager);
     const observationEngine = new ObservationEngine(stateManager);
-    const stallDetector = new StallDetector(stateManager);
+    const stallDetector = new StallDetector(stateManager, characterConfig);
     const satisficingJudge = new SatisficingJudge(stateManager);
     const ethicsGate = new EthicsGate(stateManager, llmClient);
     const sessionManager = new SessionManager(stateManager);
@@ -110,7 +131,7 @@ export class CLIRunner {
       { approvalFn }
     );
 
-    const reportingEngine = new ReportingEngine(stateManager);
+    const reportingEngine = new ReportingEngine(stateManager, undefined, characterConfig);
 
     // Wrap pure-function modules to satisfy the CoreLoopDeps interface
     const gapCalculator: GapCalculatorModule = {
@@ -142,7 +163,8 @@ export class CLIRunner {
       stateManager,
       llmClient,
       ethicsGate,
-      observationEngine
+      observationEngine,
+      characterConfig
     );
 
     return { coreLoop, goalNegotiator, reportingEngine, stateManager, driveSystem };
@@ -155,10 +177,11 @@ export class CLIRunner {
     loopConfig?: LoopConfig
   ): Promise<number> {
     const apiKey = this.getApiKey();
-    if (!apiKey) {
+    if (!apiKey && process.env.MOTIVA_LLM_PROVIDER !== "ollama") {
       console.error(
         "Error: ANTHROPIC_API_KEY environment variable is not set.\n" +
-          "Set it with: export ANTHROPIC_API_KEY=<your-key>"
+          "Set it with: export ANTHROPIC_API_KEY=<your-key>\n" +
+          "Or use Ollama: export MOTIVA_LLM_PROVIDER=ollama"
       );
       return 1;
     }
@@ -249,10 +272,11 @@ export class CLIRunner {
     opts: { deadline?: string; constraints?: string[] }
   ): Promise<number> {
     const apiKey = this.getApiKey();
-    if (!apiKey) {
+    if (!apiKey && process.env.MOTIVA_LLM_PROVIDER !== "ollama") {
       console.error(
         "Error: ANTHROPIC_API_KEY environment variable is not set.\n" +
-          "Set it with: export ANTHROPIC_API_KEY=<your-key>"
+          "Set it with: export ANTHROPIC_API_KEY=<your-key>\n" +
+          "Or use Ollama: export MOTIVA_LLM_PROVIDER=ollama"
       );
       return 1;
     }
@@ -538,6 +562,112 @@ export class CLIRunner {
     }
   }
 
+  private cmdConfigCharacter(argv: string[]): number {
+    let values: {
+      show?: boolean;
+      reset?: boolean;
+      "caution-level"?: string;
+      "stall-flexibility"?: string;
+      "communication-directness"?: string;
+      "proactivity-level"?: string;
+    };
+
+    try {
+      ({ values } = parseArgs({
+        args: argv,
+        options: {
+          show: { type: "boolean" },
+          reset: { type: "boolean" },
+          "caution-level": { type: "string" },
+          "stall-flexibility": { type: "string" },
+          "communication-directness": { type: "string" },
+          "proactivity-level": { type: "string" },
+        },
+        strict: false,
+      }) as {
+        values: {
+          show?: boolean;
+          reset?: boolean;
+          "caution-level"?: string;
+          "stall-flexibility"?: string;
+          "communication-directness"?: string;
+          "proactivity-level"?: string;
+        };
+      });
+    } catch {
+      values = {};
+    }
+
+    const hasFlags =
+      values.show ||
+      values.reset ||
+      values["caution-level"] !== undefined ||
+      values["stall-flexibility"] !== undefined ||
+      values["communication-directness"] !== undefined ||
+      values["proactivity-level"] !== undefined;
+
+    if (!hasFlags) {
+      console.log(`Usage: motiva config character [options]
+
+Options:
+  --show                          Show current character config
+  --reset                         Reset to defaults
+  --caution-level <1-5>           Feasibility threshold (1=conservative, 5=ambitious)
+  --stall-flexibility <1-5>       Stall tolerance (1=pivot fast, 5=persistent)
+  --communication-directness <1-5> Output style (1=considerate, 5=direct/facts only)
+  --proactivity-level <1-5>       Report verbosity (1=events-only, 5=always-detailed)`);
+      return 0;
+    }
+
+    if (values.reset) {
+      this.characterConfigManager.reset();
+      const config = this.characterConfigManager.load();
+      console.log("Character config reset to defaults:");
+      printCharacterConfig(config);
+      return 0;
+    }
+
+    if (values.show) {
+      const config = this.characterConfigManager.load();
+      console.log("Current character config:");
+      printCharacterConfig(config);
+      return 0;
+    }
+
+    // Build partial update from provided flags
+    const partial: Record<string, number> = {};
+
+    const paramMap: Array<[string, string]> = [
+      ["caution-level", "caution_level"],
+      ["stall-flexibility", "stall_flexibility"],
+      ["communication-directness", "communication_directness"],
+      ["proactivity-level", "proactivity_level"],
+    ];
+
+    for (const [flag, key] of paramMap) {
+      const raw = values[flag as keyof typeof values] as string | undefined;
+      if (raw !== undefined) {
+        const parsed = parseInt(raw, 10);
+        if (isNaN(parsed) || parsed < 1 || parsed > 5) {
+          console.error(`Error: --${flag} must be an integer between 1 and 5 (got: ${raw})`);
+          return 1;
+        }
+        partial[key] = parsed;
+      }
+    }
+
+    try {
+      const updated = this.characterConfigManager.update(partial);
+      console.log("Character config updated:");
+      printCharacterConfig(updated);
+      return 0;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      console.error(`Error: Failed to update character config: ${message}`);
+      return 1;
+    }
+  }
+
   // ─── Main dispatch ───
 
   /**
@@ -696,6 +826,23 @@ export class CLIRunner {
       return 0;
     }
 
+    if (subcommand === "config") {
+      const configSubcommand = argv[1];
+
+      if (!configSubcommand) {
+        console.error("Error: config subcommand required. Available: config character");
+        return 1;
+      }
+
+      if (configSubcommand === "character") {
+        return this.cmdConfigCharacter(argv.slice(2));
+      }
+
+      console.error(`Unknown config subcommand: "${configSubcommand}"`);
+      console.error("Available: config character");
+      return 1;
+    }
+
     if (subcommand === "tui") {
       // Dynamically import to avoid bundling Ink into the CLI when not needed
       const { startTUI } = await import("./tui/entry.js");
@@ -730,6 +877,7 @@ Usage:
   motiva start --goal <id>            Start daemon mode for one or more goals
   motiva stop                         Stop the running daemon
   motiva cron --goal <id>             Print crontab entry for a goal
+  motiva config character             Show or update character configuration
 
 Options (motiva run):
   --goal <id>                         Goal ID to run (required)
@@ -740,6 +888,14 @@ Options (motiva goal add):
   --deadline <ISO-date>               Optional deadline (e.g. 2026-06-01)
   --constraint <text>                 Optional constraint (repeatable)
 
+Options (motiva config character):
+  --show                              Show current character config
+  --reset                             Reset to defaults
+  --caution-level <1-5>               Feasibility threshold (1=conservative, 5=ambitious)
+  --stall-flexibility <1-5>           Stall tolerance (1=pivot fast, 5=persistent)
+  --communication-directness <1-5>    Output style (1=considerate, 5=direct)
+  --proactivity-level <1-5>           Report verbosity (1=events-only, 5=always-detailed)
+
 Environment:
   ANTHROPIC_API_KEY                   Required for LLM-powered commands
 
@@ -749,7 +905,21 @@ Examples:
   motiva run --goal <id>
   motiva status --goal <id>
   motiva report --goal <id>
+  motiva config character --show
+  motiva config character --caution-level 3
 `.trim());
+}
+
+function printCharacterConfig(config: {
+  caution_level: number;
+  stall_flexibility: number;
+  communication_directness: number;
+  proactivity_level: number;
+}): void {
+  console.log(`  caution_level:              ${config.caution_level}  (1=conservative, 5=ambitious)`);
+  console.log(`  stall_flexibility:          ${config.stall_flexibility}  (1=pivot fast, 5=persistent)`);
+  console.log(`  communication_directness:   ${config.communication_directness}  (1=considerate, 5=direct)`);
+  console.log(`  proactivity_level:          ${config.proactivity_level}  (1=events-only, 5=always-detailed)`);
 }
 
 // ─── Entry point (when run directly as a binary) ───

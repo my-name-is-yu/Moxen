@@ -1,3 +1,4 @@
+import { CuriosityEngine } from "./curiosity-engine.js";
 import type { StateManager } from "./state-manager.js";
 import type { ObservationEngine } from "./observation-engine.js";
 import type { TaskLifecycle, TaskCycleResult } from "./task-lifecycle.js";
@@ -117,6 +118,7 @@ export interface CoreLoopDeps {
   knowledgeManager?: KnowledgeManager;
   capabilityDetector?: CapabilityDetector;
   portfolioManager?: PortfolioManager;
+  curiosityEngine?: CuriosityEngine;
 }
 
 // ─── Helpers ───
@@ -290,6 +292,30 @@ export class CoreLoop {
       // Delay between loops (skip on last iteration)
       if (loopIndex < this.config.maxIterations - 1 && this.config.delayBetweenLoopsMs > 0) {
         await sleep(this.config.delayBetweenLoopsMs);
+      }
+    }
+
+    // After loop completes, check curiosity triggers if engine is available
+    if (this.deps.curiosityEngine && (finalStatus === "completed" || finalStatus === "max_iterations")) {
+      try {
+        // Expire old proposals
+        this.deps.curiosityEngine.checkAutoExpiration();
+
+        // Reload goal to get latest state
+        const currentGoal = this.deps.stateManager.loadGoal(goalId);
+        if (currentGoal) {
+          const allGoals = [currentGoal]; // MVP: single goal context
+
+          if (this.deps.curiosityEngine.shouldExplore(allGoals)) {
+            const triggers = this.deps.curiosityEngine.evaluateTriggers(allGoals);
+            if (triggers.length > 0) {
+              await this.deps.curiosityEngine.generateProposals(triggers, allGoals);
+            }
+          }
+        }
+      } catch (err) {
+        // Curiosity failures should never break the main loop
+        console.warn("CoreLoop: curiosity evaluation failed:", err);
       }
     }
 
@@ -685,6 +711,14 @@ export class CoreLoop {
       result.elapsedMs = Date.now() - startTime;
       this.tryGenerateReport(goalId, loopIndex, result, goal);
       return result;
+    }
+
+    // Track curiosity goal loop count
+    if (this.deps.curiosityEngine) {
+      const currentGoal = this.deps.stateManager.loadGoal(goalId);
+      if (currentGoal?.origin === "curiosity") {
+        this.deps.curiosityEngine.incrementLoopCount(goalId);
+      }
     }
 
     // ─── 8. Report ───

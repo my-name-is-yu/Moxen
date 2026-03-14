@@ -22,6 +22,7 @@ export const EthicsLogSchema = z.object({
   subject_id: z.string(),
   subject_description: z.string(),
   verdict: EthicsVerdictSchema,
+  layer1_triggered: z.boolean().optional(),
   rejection_delivered: z.object({
     message: z.string(),
     delivered_at: z.string(),
@@ -34,3 +35,30 @@ export const EthicsLogSchema = z.object({
   }).optional(),
 });
 export type EthicsLog = z.infer<typeof EthicsLogSchema>;
+
+export const Layer1RuleCategoryEnum = z.enum([
+  "illegal_activity",
+  "direct_harm",
+  "privacy_violation",
+  "deception_impersonation",
+  "security_breach",
+  "discrimination_harassment_automation",
+]);
+export type Layer1RuleCategory = z.infer<typeof Layer1RuleCategoryEnum>;
+
+export interface Layer1Rule {
+  category: Layer1RuleCategory;
+  description: string;
+  matches: (input: string) => boolean;
+}
+
+export const CustomConstraintSchema = z.object({
+  description: z.string(),
+  applies_to: z.enum(["goal", "task_means"]),
+});
+export type CustomConstraint = z.infer<typeof CustomConstraintSchema>;
+
+export const CustomConstraintsConfigSchema = z.object({
+  constraints: z.array(CustomConstraintSchema),
+});
+export type CustomConstraintsConfig = z.infer<typeof CustomConstraintsConfigSchema>;

@@ -5,7 +5,13 @@ import {
   EthicsVerdictSchema,
   EthicsLogSchema,
 } from "./types/ethics.js";
-import type { EthicsVerdict, EthicsLog, EthicsSubjectType } from "./types/ethics.js";
+import type {
+  EthicsVerdict,
+  EthicsLog,
+  EthicsSubjectType,
+  Layer1Rule,
+  CustomConstraintsConfig,
+} from "./types/ethics.js";
 
 // ─── Constants ───
 
@@ -13,6 +19,223 @@ const CONFIDENCE_FLAG_THRESHOLD = 0.6;
 
 /** Path relative to StateManager base dir for the ethics log */
 const ETHICS_LOG_PATH = "ethics/ethics-log.json";
+
+// ─── Layer 1: Category-based blocklist ───
+
+/**
+ * Hardcoded Layer 1 rules for immediate rejection without LLM call.
+ * These rules classify intent, not keywords. Each rule uses combinations
+ * of intent-indicating phrases with negation checks for legitimate contexts.
+ * False negatives (passing to Layer 2) are acceptable; false positives are NOT.
+ */
+const LAYER1_RULES: Layer1Rule[] = [
+  {
+    category: "illegal_activity",
+    description: "Unauthorized access, theft, fraud, copyright infringement, or other illegal activities",
+    matches: (input: string): boolean => {
+      const s = input.toLowerCase();
+      // Negation checks: legitimate contexts that should pass through
+      // Note: "unauthorized" contains "authorized" as substring, so we must use word boundary check
+      const hasAuthorizedContext =
+        s.includes("penetration test") ||
+        s.includes("pen test") ||
+        /\bauthorized\b/.test(s) ||
+        s.includes("ctf") ||
+        s.includes("capture the flag") ||
+        s.includes("security research") ||
+        s.includes("own system") ||
+        s.includes("our system") ||
+        s.includes("bug bounty");
+      if (hasAuthorizedContext) return false;
+      // Intent-level patterns for illegal activity
+      const hasUnauthorizedAccess =
+        (s.includes("unauthorized") && (s.includes("access") || s.includes("break into") || s.includes("intrude"))) ||
+        (s.includes("without permission") && (s.includes("access") || s.includes("system") || s.includes("account")));
+      const hasTheft =
+        (s.includes("steal") && (s.includes("data") || s.includes("credentials") || s.includes("information") || s.includes("money"))) ||
+        (s.includes("theft") && (s.includes("data") || s.includes("identity") || s.includes("credential")));
+      const hasPiracy =
+        (s.includes("pirate") || s.includes("crack")) &&
+        (s.includes("software") || s.includes("license") || s.includes("game") || s.includes("application"));
+      const hasFraud =
+        (s.includes("commit") && s.includes("fraud") && (s.includes("financial") || s.includes("bank") || s.includes("insurance") || s.includes("wire"))) ||
+        s.includes("tax evasion") ||
+        (s.includes("forge") && (s.includes("document") || s.includes("signature") || s.includes("certificate")));
+      return hasUnauthorizedAccess || hasTheft || hasPiracy || hasFraud;
+    },
+  },
+  {
+    category: "direct_harm",
+    description: "Plans to physically harm people, harassment automation, or reputational damage campaigns",
+    matches: (input: string): boolean => {
+      const s = input.toLowerCase();
+      // Negation checks: research, fiction, historical contexts
+      const isLegitimate =
+        s.includes("fiction") ||
+        s.includes("novel") ||
+        s.includes("historical") ||
+        s.includes("case study") ||
+        s.includes("research on") ||
+        s.includes("prevent") ||
+        s.includes("detect");
+      if (isLegitimate) return false;
+      const hasHarassment =
+        (s.includes("harass") && (s.includes("person") || s.includes("user") || s.includes("employee") || s.includes("target") || s.includes("people") || s.includes("them"))) ||
+        (s.includes("bully") && (s.includes("target") || s.includes("person") || s.includes("them") || s.includes("online")));
+      const hasThreat =
+        (s.includes("threaten") && (s.includes("person") || s.includes("user") || s.includes("them") || s.includes("employee"))) ||
+        s.includes("send threats") ||
+        s.includes("make threats");
+      const hasStalking =
+        s.includes("stalk") ||
+        (s.includes("track") && s.includes("without") && (s.includes("consent") || s.includes("knowing") || s.includes("knowledge")));
+      const hasReputationAttack =
+        (s.includes("destroy") || s.includes("damage") || s.includes("ruin")) &&
+        (s.includes("reputation") || s.includes("career"));
+      const hasPhysicalHarm =
+        s.includes("hurt") && (s.includes("people") || s.includes("person") || s.includes("them")) ||
+        s.includes("plan to harm") ||
+        s.includes("plan to attack");
+      return hasHarassment || hasThreat || hasStalking || hasReputationAttack || hasPhysicalHarm;
+    },
+  },
+  {
+    category: "privacy_violation",
+    description: "Unauthorized personal data acquisition or sale, unconsented tracking, misuse of PII",
+    matches: (input: string): boolean => {
+      const s = input.toLowerCase();
+      // Negation checks: consented, public, anonymized
+      const isLegitimate =
+        s.includes("with consent") ||
+        s.includes("user consent") ||
+        s.includes("opt-in") ||
+        s.includes("anonymized") ||
+        s.includes("public data") ||
+        s.includes("publicly available") ||
+        s.includes("privacy policy") ||
+        s.includes("gdpr compliant");
+      if (isLegitimate) return false;
+      const hasUnconsented =
+        (s.includes("personal data without consent") || s.includes("user data without consent") || s.includes("private data without consent") || s.includes("collect data without consent") || s.includes("data without their consent") || s.includes("information without consent") || s.includes("data without consent")) ||
+        (s.includes("without knowing") && (s.includes("collect") || s.includes("track") || s.includes("monitor")));
+      const hasSpying =
+        s.includes("spy on") ||
+        (s.includes("monitor") && s.includes("without") && (s.includes("knowing") || s.includes("consent") || s.includes("permission")));
+      const hasPiiMisuse =
+        (s.includes("sell") && (s.includes("personal data") || s.includes("pii") || s.includes("private information") || s.includes("user data"))) ||
+        (s.includes("leak") && (s.includes("personal data") || s.includes("private") || s.includes("pii")));
+      const hasIllegalTracking =
+        (s.includes("track") && (s.includes("location") || s.includes("movement")) && s.includes("without"));
+      return hasUnconsented || hasSpying || hasPiiMisuse || hasIllegalTracking;
+    },
+  },
+  {
+    category: "deception_impersonation",
+    description: "False identity contact, phishing, mass disinformation generation, impersonating organizations or persons",
+    matches: (input: string): boolean => {
+      const s = input.toLowerCase();
+      // Negation checks: parody, satire, fiction, authorized testing
+      const isLegitimate =
+        s.includes("parody") ||
+        s.includes("satire") ||
+        s.includes("fiction") ||
+        s.includes("authorized") ||
+        s.includes("authorization") ||
+        s.includes("on behalf") ||
+        s.includes("simulation") ||
+        s.includes("awareness training") ||
+        s.includes("phishing test");
+      if (isLegitimate) return false;
+      const hasImpersonation =
+        (s.includes("impersonate") && (s.includes("person") || s.includes("company") || s.includes("organization") || s.includes("official") || s.includes("bank") || s.includes("government"))) ||
+        (s.includes("pretend to be") && (s.includes("company") || s.includes("official") || s.includes("authority") || s.includes("organization")));
+      const hasPhishing =
+        s.includes("phishing") ||
+        (s.includes("fake") && (s.includes("login page") || s.includes("email") || s.includes("website")) && (s.includes("steal") || s.includes("credentials") || s.includes("password")));
+      const hasDisinformation =
+        (s.includes("generate") || s.includes("create") || s.includes("spread") || s.includes("mass")) &&
+        (s.includes("disinformation") || s.includes("misinformation") || s.includes("fake news") || s.includes("false information"));
+      const hasFalseIdentity =
+        s.includes("false identity") ||
+        (s.includes("fake identity") && s.includes("contact"));
+      return hasImpersonation || hasPhishing || hasDisinformation || hasFalseIdentity;
+    },
+  },
+  {
+    category: "security_breach",
+    description: "Creation or use of unauthorized access tools, malicious exploitation of vulnerabilities",
+    matches: (input: string): boolean => {
+      const s = input.toLowerCase();
+      // Negation checks: own systems, authorized, research, CTF, defensive
+      const isLegitimate =
+        s.includes("own system") ||
+        s.includes("own systems") ||
+        s.includes("our system") ||
+        s.includes("our systems") ||
+        s.includes("authorized") ||
+        s.includes("authorization") ||
+        s.includes("penetration test") ||
+        s.includes("pen test") ||
+        s.includes("ctf") ||
+        s.includes("capture the flag") ||
+        s.includes("bug bounty") ||
+        s.includes("security research") ||
+        s.includes("defensive") ||
+        s.includes("patch");
+      if (isLegitimate) return false;
+      const hasExploit =
+        (s.includes("exploit") && (s.includes("vulnerability") || s.includes("zero-day") || s.includes("cve"))) ||
+        (s.includes("exploit") && (s.includes("system") || s.includes("server") || s.includes("network")) && !s.includes("own"));
+      const hasMalware =
+        s.includes("create malware") ||
+        s.includes("write malware") ||
+        s.includes("develop malware") ||
+        s.includes("deploy ransomware") ||
+        s.includes("create ransomware") ||
+        s.includes("create virus") ||
+        s.includes("write virus") ||
+        (s.includes("create") && s.includes("trojan")) ||
+        (s.includes("write") && s.includes("keylogger") && !s.includes("own"));
+      const hasUnauthorizedTool =
+        (s.includes("tool") || s.includes("script")) &&
+        (s.includes("unauthorized access") || s.includes("bypass authentication") || s.includes("bypass security"));
+      const hasBackdoor =
+        s.includes("install backdoor") ||
+        s.includes("create backdoor") ||
+        (s.includes("backdoor") && (s.includes("server") || s.includes("system") || s.includes("network")));
+      return hasExploit || hasMalware || hasUnauthorizedTool || hasBackdoor;
+    },
+  },
+  {
+    category: "discrimination_harassment_automation",
+    description: "Organized attacks on protected attributes, automated discriminatory selection or exclusion",
+    matches: (input: string): boolean => {
+      const s = input.toLowerCase();
+      // Negation checks: research, analysis, study, audit
+      const isLegitimate =
+        s.includes("research") ||
+        s.includes("study") ||
+        s.includes("analyze") ||
+        s.includes("audit") ||
+        s.includes("diversity") ||
+        s.includes("inclusion") ||
+        s.includes("anti-discrimination") ||
+        s.includes("equal opportunity");
+      if (isLegitimate) return false;
+      const hasDiscrimination =
+        (s.includes("discriminate") && (s.includes("race") || s.includes("gender") || s.includes("religion") || s.includes("ethnicity") || s.includes("disability") || s.includes("age") || s.includes("sexual orientation"))) ||
+        (s.includes("exclude") && (s.includes("based on race") || s.includes("based on gender") || s.includes("based on religion") || s.includes("based on ethnicity")));
+      const hasHarassmentAutomation =
+        (s.includes("automate") || s.includes("automated") || s.includes("bot") || s.includes("mass")) &&
+        (s.includes("harass") || s.includes("attack") || s.includes("abuse") || s.includes("troll")) &&
+        (s.includes("people") || s.includes("users") || s.includes("group") || s.includes("community") || s.includes("race") || s.includes("gender") || s.includes("religion"));
+      const hasProtectedAttributeFilter =
+        (s.includes("filter out") || s.includes("filter") || s.includes("reject") || s.includes("deny") || s.includes("block") || s.includes("screen out") || s.includes("exclude")) &&
+        (s.includes("based on race") || s.includes("based on gender") || s.includes("based on religion") || s.includes("based on ethnicity") || s.includes("based on disability"));
+      return hasDiscrimination || hasHarassmentAutomation || hasProtectedAttributeFilter;
+    },
+  },
+];
 
 // ─── System prompt ───
 
@@ -92,14 +315,24 @@ Rules:
  *
  * Persistence: `ethics/ethics-log.json` via StateManager readRaw/writeRaw.
  * Read all → append → write all pattern (full JSON array, not JSONL).
+ *
+ * Layer 1: Hardcoded category-based blocklist (no LLM call). Runs before Layer 2.
+ * Layer 2: LLM-based evaluation. Only runs when Layer 1 passes.
+ * Custom constraints: Injected into the Layer 2 LLM prompt as additional context.
  */
 export class EthicsGate {
   private readonly stateManager: StateManager;
   private readonly llmClient: ILLMClient;
+  private readonly customConstraints?: CustomConstraintsConfig;
 
-  constructor(stateManager: StateManager, llmClient: ILLMClient) {
+  constructor(
+    stateManager: StateManager,
+    llmClient: ILLMClient,
+    customConstraints?: CustomConstraintsConfig
+  ) {
     this.stateManager = stateManager;
     this.llmClient = llmClient;
+    this.customConstraints = customConstraints;
   }
 
   // ─── Private: Log I/O ───
@@ -121,12 +354,35 @@ export class EthicsGate {
     this.saveLogs(logs);
   }
 
+  // ─── Private: Layer 1 evaluation ───
+
+  /**
+   * Checks the input description against all hardcoded Layer 1 rules.
+   * Returns an EthicsVerdict with verdict "reject" and confidence 1.0 if any rule matches.
+   * Returns null if no rule matches (pass to Layer 2).
+   */
+  private checkLayer1(description: string): EthicsVerdict | null {
+    for (const rule of LAYER1_RULES) {
+      if (rule.matches(description)) {
+        return {
+          verdict: "reject",
+          category: rule.category,
+          reasoning: rule.description,
+          risks: [],
+          confidence: 1.0,
+        };
+      }
+    }
+    return null;
+  }
+
   // ─── Private: LLM evaluation ───
 
   private buildUserMessage(
     subjectType: EthicsSubjectType,
     description: string,
-    context?: string
+    context?: string,
+    applyConstraints?: boolean
   ): string {
     const lines: string[] = [
       `Subject type: ${subjectType}`,
@@ -135,18 +391,46 @@ export class EthicsGate {
     if (context) {
       lines.push(`Additional context: ${context}`);
     }
+    if (applyConstraints && this.customConstraints && this.customConstraints.constraints.length > 0) {
+      const goalConstraints = this.customConstraints.constraints.filter(
+        (c) => c.applies_to === "goal"
+      );
+      if (goalConstraints.length > 0) {
+        lines.push("");
+        lines.push("Additional organizational constraints:");
+        for (const constraint of goalConstraints) {
+          lines.push(`- ${constraint.description}`);
+        }
+        lines.push("You MUST flag or reject any subject that violates these constraints.");
+      }
+    }
     return lines.join("\n");
   }
 
   private buildMeansUserMessage(
     taskDescription: string,
-    means: string
+    means: string,
+    applyConstraints?: boolean
   ): string {
-    return [
+    const lines = [
       `Subject type: task (means evaluation)`,
       `Task description: ${taskDescription}`,
       `Proposed means / execution method: ${means}`,
-    ].join("\n");
+    ];
+    if (applyConstraints && this.customConstraints && this.customConstraints.constraints.length > 0) {
+      const meansConstraints = this.customConstraints.constraints.filter(
+        (c) => c.applies_to === "task_means"
+      );
+      if (meansConstraints.length > 0) {
+        lines.push("");
+        lines.push("Additional organizational constraints:");
+        for (const constraint of meansConstraints) {
+          lines.push(`- ${constraint.description}`);
+        }
+        lines.push("You MUST flag or reject any subject that violates these constraints.");
+      }
+    }
+    return lines.join("\n");
   }
 
   private parseVerdictSafe(content: string): EthicsVerdict {
@@ -176,11 +460,14 @@ export class EthicsGate {
    * Evaluate a goal, subgoal, or task for ethical concerns.
    *
    * Steps:
-   * 1. Send ethics judgment prompt to LLM
-   * 2. Parse response with EthicsVerdictSchema
-   * 3. If confidence < CONFIDENCE_FLAG_THRESHOLD, auto-override verdict to "flag"
-   * 4. Create EthicsLog entry, persist
-   * 5. Return verdict
+   * 1. Run Layer 1 (checkLayer1) — synchronous, no LLM call
+   *    - If match: log with layer1_triggered=true and return immediately
+   * 2. Build LLM prompt, injecting custom constraints for "goal" applies_to
+   * 3. Send ethics judgment prompt to LLM (Layer 2)
+   * 4. Parse response with EthicsVerdictSchema
+   * 5. If confidence < CONFIDENCE_FLAG_THRESHOLD, auto-override verdict to "flag"
+   * 6. Create EthicsLog entry, persist
+   * 7. Return verdict
    *
    * On LLM call failure: throws (caller handles).
    * On JSON parse failure: returns conservative fallback with verdict "flag".
@@ -191,7 +478,24 @@ export class EthicsGate {
     description: string,
     context?: string
   ): Promise<EthicsVerdict> {
-    const userMessage = this.buildUserMessage(subjectType, description, context);
+    // Layer 1 check
+    const layer1Result = this.checkLayer1(description);
+    if (layer1Result !== null) {
+      const logEntry: EthicsLog = EthicsLogSchema.parse({
+        log_id: randomUUID(),
+        timestamp: new Date().toISOString(),
+        subject_type: subjectType,
+        subject_id: subjectId,
+        subject_description: description,
+        verdict: layer1Result,
+        layer1_triggered: true,
+      });
+      this.appendLog(logEntry);
+      return layer1Result;
+    }
+
+    // Layer 2: LLM evaluation
+    const userMessage = this.buildUserMessage(subjectType, description, context, true);
 
     const response = await this.llmClient.sendMessage(
       [{ role: "user", content: userMessage }],
@@ -208,6 +512,7 @@ export class EthicsGate {
       subject_id: subjectId,
       subject_description: description,
       verdict,
+      layer1_triggered: false,
     });
 
     this.appendLog(logEntry);
@@ -219,14 +524,36 @@ export class EthicsGate {
    * Evaluate the execution means of a task for ethical concerns.
    * Intended for Phase 2 integration with TaskLifecycle.
    *
-   * Behaves identically to check() but builds a means-specific prompt.
+   * Steps:
+   * 1. Run Layer 1 on combined taskDescription + means
+   *    - If match: log with layer1_triggered=true and return immediately
+   * 2. Build LLM prompt, injecting custom constraints for "task_means" applies_to
+   * 3. LLM-based Layer 2 evaluation
+   * 4. Log and return
    */
   async checkMeans(
     taskId: string,
     taskDescription: string,
     means: string
   ): Promise<EthicsVerdict> {
-    const userMessage = this.buildMeansUserMessage(taskDescription, means);
+    // Layer 1 check (combined input for full context)
+    const layer1Result = this.checkLayer1(`${taskDescription} ${means}`);
+    if (layer1Result !== null) {
+      const logEntry: EthicsLog = EthicsLogSchema.parse({
+        log_id: randomUUID(),
+        timestamp: new Date().toISOString(),
+        subject_type: "task",
+        subject_id: taskId,
+        subject_description: `${taskDescription} | means: ${means}`,
+        verdict: layer1Result,
+        layer1_triggered: true,
+      });
+      this.appendLog(logEntry);
+      return layer1Result;
+    }
+
+    // Layer 2: LLM evaluation
+    const userMessage = this.buildMeansUserMessage(taskDescription, means, true);
 
     const response = await this.llmClient.sendMessage(
       [{ role: "user", content: userMessage }],
@@ -243,6 +570,7 @@ export class EthicsGate {
       subject_id: taskId,
       subject_description: `${taskDescription} | means: ${means}`,
       verdict,
+      layer1_triggered: false,
     });
 
     this.appendLog(logEntry);

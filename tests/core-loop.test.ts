@@ -60,6 +60,7 @@ function makeGoal(overrides: Partial<Goal> = {}): Goal {
         weight: 1.0,
         uncertainty_weight: null,
         state_integrity: "ok",
+        dimension_mapping: null,
       },
       {
         name: "dim2",
@@ -79,6 +80,7 @@ function makeGoal(overrides: Partial<Goal> = {}): Goal {
         weight: 1.0,
         uncertainty_weight: null,
         state_integrity: "ok",
+        dimension_mapping: null,
       },
     ],
     gap_aggregation: "max",

@@ -18,6 +18,18 @@ export const HistoryEntrySchema = z.object({
 });
 export type HistoryEntry = z.infer<typeof HistoryEntrySchema>;
 
+// --- Satisficing Aggregation Enum (distinct from gap calculation aggregation) ---
+
+/**
+ * SatisficingAggregation defines how multiple subgoal dimensions aggregate
+ * into a parent goal dimension during completion propagation.
+ *
+ * Note: This is distinct from AggregationTypeEnum (gap calculation) which includes "weighted_avg".
+ * Satisficing uses simple aggregation strategies: min, avg, max, all_required.
+ */
+export const SatisficingAggregationEnum = z.enum(["min", "avg", "max", "all_required"]);
+export type SatisficingAggregation = z.infer<typeof SatisficingAggregationEnum>;
+
 // --- Dimension ---
 
 export const DimensionSchema = z.object({
@@ -39,6 +51,19 @@ export const DimensionSchema = z.object({
    * See task-lifecycle.md §6.
    */
   state_integrity: z.enum(["ok", "uncertain"]).default("ok"),
+  /**
+   * Maps this subgoal dimension to a parent goal dimension with an aggregation strategy.
+   * When set, propagateSubgoalCompletion uses parent_dimension (not name matching)
+   * and aggregates multiple subgoal dimensions mapped to the same parent dimension.
+   * See satisficing.md §7 Phase 2.
+   */
+  dimension_mapping: z
+    .object({
+      parent_dimension: z.string(),
+      aggregation: SatisficingAggregationEnum,
+    })
+    .nullable()
+    .default(null),
 });
 export type Dimension = z.infer<typeof DimensionSchema>;
 
@@ -99,7 +124,7 @@ export const GoalSchema = z.object({
   // Milestone-specific fields
   target_date: z.string().nullable().default(null),
   origin: z
-    .enum(["negotiation", "decomposition", "manual"])
+    .enum(["negotiation", "decomposition", "manual", "curiosity"])
     .nullable()
     .default(null),
   pace_snapshot: PaceSnapshotSchema.nullable().default(null),

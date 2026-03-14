@@ -22,9 +22,11 @@ export {
 } from "./drive-scorer.js";
 export { ObservationEngine } from "./observation-engine.js";
 export { StallDetector } from "./stall-detector.js";
-export { SatisficingJudge } from "./satisficing-judge.js";
+export { SatisficingJudge, aggregateValues } from "./satisficing-judge.js";
 export type { ILLMClient, LLMMessage, LLMRequestOptions, LLMResponse } from "./llm-client.js";
-export { LLMClient, MockLLMClient } from "./llm-client.js";
+export { LLMClient, MockLLMClient, extractJSON } from "./llm-client.js";
+export { OllamaLLMClient } from "./ollama-client.js";
+export type { OllamaClientConfig } from "./ollama-client.js";
 export { EthicsGate } from "./ethics-gate.js";
 export { SessionManager } from "./session-manager.js";
 export { StrategyManager } from "./strategy-manager.js";
@@ -58,3 +60,28 @@ export type { EventServerConfig } from "./event-server.js";
 export { NotificationDispatcher } from "./notification-dispatcher.js";
 export type { INotificationDispatcher } from "./notification-dispatcher.js";
 export { MemoryLifecycleManager } from "./memory-lifecycle.js";
+export { CharacterConfigManager } from "./character-config.js";
+export { CharacterConfigSchema, DEFAULT_CHARACTER_CONFIG } from "./types/character.js";
+export type { CharacterConfig } from "./types/character.js";
+export { SatisficingAggregationEnum } from "./types/goal.js";
+export type { SatisficingAggregation } from "./types/goal.js";
+export { CuriosityEngine } from "./curiosity-engine.js";
+export type { CuriosityEngineDeps } from "./curiosity-engine.js";
+export {
+  CuriosityTriggerTypeEnum,
+  CuriosityTriggerSchema,
+  CuriosityProposalStatusEnum,
+  CuriosityProposalSchema,
+  CuriosityConfigSchema,
+  LearningRecordSchema,
+  CuriosityStateSchema,
+} from "./types/curiosity.js";
+export type {
+  CuriosityTriggerType,
+  CuriosityTrigger,
+  CuriosityProposalStatus,
+  CuriosityProposal,
+  CuriosityConfig,
+  LearningRecord,
+  CuriosityState,
+} from "./types/curiosity.js";

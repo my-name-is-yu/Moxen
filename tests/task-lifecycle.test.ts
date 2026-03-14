@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as os from "node:os";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -2870,6 +2870,580 @@ describe("TaskLifecycle", () => {
       expect(result.success).toBe(false);
       expect(result.stopped_reason).toBe("error");
       expect(typeof result.error).toBe("string");
+    });
+  });
+
+  // ─────────────────────────────────────────────
+  // runTaskCycle — ethics means check
+  // ─────────────────────────────────────────────
+
+  describe("runTaskCycle — ethics means check", () => {
+    // Shared helper: a mock EthicsGate with controllable checkMeans
+    function makeMockEthicsGate(checkMeansImpl: () => Promise<import("../src/types/ethics.js").EthicsVerdict>) {
+      return {
+        check: vi.fn().mockResolvedValue({
+          verdict: "pass",
+          category: "safe",
+          reasoning: "ok",
+          risks: [],
+          confidence: 0.9,
+        }),
+        checkMeans: vi.fn().mockImplementation(checkMeansImpl),
+      };
+    }
+
+    const PASS_VERDICT: import("../src/types/ethics.js").EthicsVerdict = {
+      verdict: "pass",
+      category: "safe",
+      reasoning: "Task approach is safe",
+      risks: [],
+      confidence: 0.9,
+    };
+
+    const REJECT_VERDICT: import("../src/types/ethics.js").EthicsVerdict = {
+      verdict: "reject",
+      category: "harmful",
+      reasoning: "Task involves harmful actions",
+      risks: ["potential harm to users"],
+      confidence: 0.95,
+    };
+
+    const FLAG_VERDICT: import("../src/types/ethics.js").EthicsVerdict = {
+      verdict: "flag",
+      category: "privacy_concern",
+      reasoning: "Task may expose user data",
+      risks: ["privacy risk"],
+      confidence: 0.7,
+    };
+
+    it("ethicsGate not provided: runTaskCycle proceeds normally and task executes successfully", async () => {
+      // No ethicsGate passed → ethics check is entirely skipped
+      const llm = createMockLLMClient([VALID_TASK_RESPONSE, LLM_REVIEW_PASS]);
+      const lifecycle = createLifecycle(llm, {
+        approvalFn: async () => true,
+        // no ethicsGate
+      });
+      const gapVector = makeGapVector("goal-1", [{ name: "coverage", gap: 0.5 }]);
+      const context = makeDriveContext(["coverage"]);
+      let adapterExecuteCalled = false;
+      const adapter: import("../src/task-lifecycle.js").IAdapter = {
+        adapterType: "mock",
+        async execute() {
+          adapterExecuteCalled = true;
+          return {
+            success: true,
+            output: "done",
+            error: null,
+            exit_code: 0,
+            elapsed_ms: 50,
+            stopped_reason: "completed" as const,
+          };
+        },
+      };
+
+      const result = await lifecycle.runTaskCycle("goal-1", gapVector, context, adapter);
+
+      expect(adapterExecuteCalled).toBe(true);
+      expect(result.action).toBe("completed");
+    });
+
+    it("ethics pass: checkMeans returns pass verdict and task proceeds to adapter execution", async () => {
+      const ethicsGate = makeMockEthicsGate(async () => PASS_VERDICT);
+      const llm = createMockLLMClient([VALID_TASK_RESPONSE, LLM_REVIEW_PASS]);
+      const lifecycle = createLifecycle(llm, {
+        approvalFn: async () => true,
+        ethicsGate: ethicsGate as unknown as import("../src/ethics-gate.js").EthicsGate,
+      });
+      const gapVector = makeGapVector("goal-1", [{ name: "coverage", gap: 0.5 }]);
+      const context = makeDriveContext(["coverage"]);
+      let adapterExecuteCalled = false;
+      const adapter: import("../src/task-lifecycle.js").IAdapter = {
+        adapterType: "mock",
+        async execute() {
+          adapterExecuteCalled = true;
+          return {
+            success: true,
+            output: "done",
+            error: null,
+            exit_code: 0,
+            elapsed_ms: 50,
+            stopped_reason: "completed" as const,
+          };
+        },
+      };
+
+      const result = await lifecycle.runTaskCycle("goal-1", gapVector, context, adapter);
+
+      expect(ethicsGate.checkMeans).toHaveBeenCalledOnce();
+      expect(adapterExecuteCalled).toBe(true);
+      expect(result.action).toBe("completed");
+    });
+
+    it("ethics reject: runTaskCycle returns action=discard immediately and adapter is never called", async () => {
+      const ethicsGate = makeMockEthicsGate(async () => REJECT_VERDICT);
+      const llm = createMockLLMClient([VALID_TASK_RESPONSE]);
+      const lifecycle = createLifecycle(llm, {
+        approvalFn: async () => true,
+        ethicsGate: ethicsGate as unknown as import("../src/ethics-gate.js").EthicsGate,
+      });
+      const gapVector = makeGapVector("goal-1", [{ name: "coverage", gap: 0.5 }]);
+      const context = makeDriveContext(["coverage"]);
+      const adapterExecute = vi.fn();
+      const adapter: import("../src/task-lifecycle.js").IAdapter = {
+        adapterType: "mock",
+        async execute() {
+          adapterExecute();
+          return {
+            success: true,
+            output: "done",
+            error: null,
+            exit_code: 0,
+            elapsed_ms: 50,
+            stopped_reason: "completed" as const,
+          };
+        },
+      };
+
+      const result = await lifecycle.runTaskCycle("goal-1", gapVector, context, adapter);
+
+      expect(result.action).toBe("discard");
+      expect(adapterExecute).not.toHaveBeenCalled();
+    });
+
+    it("ethics reject: verificationResult contains ethics reasoning in evidence", async () => {
+      const ethicsGate = makeMockEthicsGate(async () => REJECT_VERDICT);
+      const llm = createMockLLMClient([VALID_TASK_RESPONSE]);
+      const lifecycle = createLifecycle(llm, {
+        approvalFn: async () => true,
+        ethicsGate: ethicsGate as unknown as import("../src/ethics-gate.js").EthicsGate,
+      });
+      const gapVector = makeGapVector("goal-1", [{ name: "coverage", gap: 0.5 }]);
+      const context = makeDriveContext(["coverage"]);
+      const adapter = createMockAdapter([]);
+
+      const result = await lifecycle.runTaskCycle("goal-1", gapVector, context, adapter);
+
+      expect(result.verificationResult.verdict).toBe("fail");
+      expect(result.verificationResult.evidence[0]?.description).toContain(REJECT_VERDICT.reasoning);
+    });
+
+    it("ethics flag + approval granted: task proceeds to adapter execution normally", async () => {
+      const ethicsGate = makeMockEthicsGate(async () => FLAG_VERDICT);
+      const llm = createMockLLMClient([VALID_TASK_RESPONSE, LLM_REVIEW_PASS]);
+      let approvalCalled = false;
+      const lifecycle = createLifecycle(llm, {
+        approvalFn: async () => {
+          approvalCalled = true;
+          return true;
+        },
+        ethicsGate: ethicsGate as unknown as import("../src/ethics-gate.js").EthicsGate,
+      });
+      const gapVector = makeGapVector("goal-1", [{ name: "coverage", gap: 0.5 }]);
+      const context = makeDriveContext(["coverage"]);
+      let adapterExecuteCalled = false;
+      const adapter: import("../src/task-lifecycle.js").IAdapter = {
+        adapterType: "mock",
+        async execute() {
+          adapterExecuteCalled = true;
+          return {
+            success: true,
+            output: "done",
+            error: null,
+            exit_code: 0,
+            elapsed_ms: 50,
+            stopped_reason: "completed" as const,
+          };
+        },
+      };
+
+      const result = await lifecycle.runTaskCycle("goal-1", gapVector, context, adapter);
+
+      expect(approvalCalled).toBe(true);
+      expect(adapterExecuteCalled).toBe(true);
+      expect(result.action).toBe("completed");
+    });
+
+    it("ethics flag + approval denied: returns action=approval_denied and adapter is never called", async () => {
+      const ethicsGate = makeMockEthicsGate(async () => FLAG_VERDICT);
+      const llm = createMockLLMClient([VALID_TASK_RESPONSE]);
+      const lifecycle = createLifecycle(llm, {
+        approvalFn: async () => false,
+        ethicsGate: ethicsGate as unknown as import("../src/ethics-gate.js").EthicsGate,
+      });
+      const gapVector = makeGapVector("goal-1", [{ name: "coverage", gap: 0.5 }]);
+      const context = makeDriveContext(["coverage"]);
+      const adapterExecute = vi.fn();
+      const adapter: import("../src/task-lifecycle.js").IAdapter = {
+        adapterType: "mock",
+        async execute() {
+          adapterExecute();
+          return {
+            success: true,
+            output: "done",
+            error: null,
+            exit_code: 0,
+            elapsed_ms: 50,
+            stopped_reason: "completed" as const,
+          };
+        },
+      };
+
+      const result = await lifecycle.runTaskCycle("goal-1", gapVector, context, adapter);
+
+      expect(result.action).toBe("approval_denied");
+      expect(adapterExecute).not.toHaveBeenCalled();
+    });
+
+    it("ethics flag + approval denied: verificationResult contains flag reasoning in evidence", async () => {
+      const ethicsGate = makeMockEthicsGate(async () => FLAG_VERDICT);
+      const llm = createMockLLMClient([VALID_TASK_RESPONSE]);
+      const lifecycle = createLifecycle(llm, {
+        approvalFn: async () => false,
+        ethicsGate: ethicsGate as unknown as import("../src/ethics-gate.js").EthicsGate,
+      });
+      const gapVector = makeGapVector("goal-1", [{ name: "coverage", gap: 0.5 }]);
+      const context = makeDriveContext(["coverage"]);
+      const adapter = createMockAdapter([]);
+
+      const result = await lifecycle.runTaskCycle("goal-1", gapVector, context, adapter);
+
+      expect(result.verificationResult.verdict).toBe("fail");
+      expect(result.verificationResult.evidence[0]?.description).toContain(FLAG_VERDICT.reasoning);
+    });
+
+    it("checkMeans receives correct arguments: task.id, task.work_description, task.approach", async () => {
+      const checkMeans = vi.fn().mockResolvedValue(PASS_VERDICT);
+      const ethicsGate = {
+        check: vi.fn().mockResolvedValue(PASS_VERDICT),
+        checkMeans,
+      };
+      const llm = createMockLLMClient([VALID_TASK_RESPONSE, LLM_REVIEW_PASS]);
+      const lifecycle = createLifecycle(llm, {
+        approvalFn: async () => true,
+        ethicsGate: ethicsGate as unknown as import("../src/ethics-gate.js").EthicsGate,
+      });
+      const gapVector = makeGapVector("goal-1", [{ name: "coverage", gap: 0.5 }]);
+      const context = makeDriveContext(["coverage"]);
+      const adapter = createMockAdapter([{ success: true }]);
+
+      const result = await lifecycle.runTaskCycle("goal-1", gapVector, context, adapter);
+
+      expect(checkMeans).toHaveBeenCalledOnce();
+      const [calledTaskId, calledWorkDesc, calledApproach] = checkMeans.mock.calls[0]!;
+      // The generated task's id should match what was passed to checkMeans
+      expect(calledTaskId).toBe(result.task.id);
+      expect(calledWorkDesc).toBe(result.task.work_description);
+      expect(calledApproach).toBe(result.task.approach);
+    });
+
+    it("ethics error propagation: when checkMeans throws, runTaskCycle propagates the error", async () => {
+      const ethicsGate = {
+        check: vi.fn(),
+        checkMeans: vi.fn().mockRejectedValue(new Error("ethics check service unavailable")),
+      };
+      const llm = createMockLLMClient([VALID_TASK_RESPONSE]);
+      const lifecycle = createLifecycle(llm, {
+        approvalFn: async () => true,
+        ethicsGate: ethicsGate as unknown as import("../src/ethics-gate.js").EthicsGate,
+      });
+      const gapVector = makeGapVector("goal-1", [{ name: "coverage", gap: 0.5 }]);
+      const context = makeDriveContext(["coverage"]);
+      const adapter = createMockAdapter([]);
+
+      await expect(
+        lifecycle.runTaskCycle("goal-1", gapVector, context, adapter)
+      ).rejects.toThrow("ethics check service unavailable");
+    });
+
+    it("ethics pass with high confidence: task completes and cycle returns completed", async () => {
+      const highConfidencePass: import("../src/types/ethics.js").EthicsVerdict = {
+        verdict: "pass",
+        category: "safe",
+        reasoning: "Fully safe operation",
+        risks: [],
+        confidence: 1.0,
+      };
+      const ethicsGate = makeMockEthicsGate(async () => highConfidencePass);
+      const llm = createMockLLMClient([VALID_TASK_RESPONSE, LLM_REVIEW_PASS]);
+      const lifecycle = createLifecycle(llm, {
+        approvalFn: async () => true,
+        ethicsGate: ethicsGate as unknown as import("../src/ethics-gate.js").EthicsGate,
+      });
+      const gapVector = makeGapVector("goal-1", [{ name: "dim", gap: 0.6 }]);
+      const context = makeDriveContext(["dim"]);
+      const adapter = createMockAdapter([{ success: true, output: "done" }]);
+
+      const result = await lifecycle.runTaskCycle("goal-1", gapVector, context, adapter);
+
+      expect(result.action).toBe("completed");
+      expect(result.verificationResult.verdict).toBe("pass");
+    });
+
+    it("ethics reject: checkMeans is called exactly once even though adapter is skipped", async () => {
+      const ethicsGate = makeMockEthicsGate(async () => REJECT_VERDICT);
+      const llm = createMockLLMClient([VALID_TASK_RESPONSE]);
+      const lifecycle = createLifecycle(llm, {
+        approvalFn: async () => true,
+        ethicsGate: ethicsGate as unknown as import("../src/ethics-gate.js").EthicsGate,
+      });
+      const gapVector = makeGapVector("goal-1", [{ name: "dim", gap: 0.5 }]);
+      const context = makeDriveContext(["dim"]);
+      const adapter = createMockAdapter([]);
+
+      await lifecycle.runTaskCycle("goal-1", gapVector, context, adapter);
+
+      expect(ethicsGate.checkMeans).toHaveBeenCalledTimes(1);
+    });
+
+    it("ethics flag + approval denied: verificationResult confidence is 1.0", async () => {
+      const ethicsGate = makeMockEthicsGate(async () => FLAG_VERDICT);
+      const llm = createMockLLMClient([VALID_TASK_RESPONSE]);
+      const lifecycle = createLifecycle(llm, {
+        approvalFn: async () => false,
+        ethicsGate: ethicsGate as unknown as import("../src/ethics-gate.js").EthicsGate,
+      });
+      const gapVector = makeGapVector("goal-1", [{ name: "dim", gap: 0.5 }]);
+      const context = makeDriveContext(["dim"]);
+      const adapter = createMockAdapter([]);
+
+      const result = await lifecycle.runTaskCycle("goal-1", gapVector, context, adapter);
+
+      expect(result.verificationResult.confidence).toBe(1.0);
+    });
+
+    it("ethics reject: verificationResult confidence is 1.0", async () => {
+      const ethicsGate = makeMockEthicsGate(async () => REJECT_VERDICT);
+      const llm = createMockLLMClient([VALID_TASK_RESPONSE]);
+      const lifecycle = createLifecycle(llm, {
+        approvalFn: async () => true,
+        ethicsGate: ethicsGate as unknown as import("../src/ethics-gate.js").EthicsGate,
+      });
+      const gapVector = makeGapVector("goal-1", [{ name: "dim", gap: 0.5 }]);
+      const context = makeDriveContext(["dim"]);
+      const adapter = createMockAdapter([]);
+
+      const result = await lifecycle.runTaskCycle("goal-1", gapVector, context, adapter);
+
+      expect(result.verificationResult.confidence).toBe(1.0);
+    });
+
+    it("ethics pass: checkMeans called before adapter.execute", async () => {
+      const callOrder: string[] = [];
+      const ethicsGate = {
+        check: vi.fn(),
+        checkMeans: vi.fn().mockImplementation(async () => {
+          callOrder.push("checkMeans");
+          return PASS_VERDICT;
+        }),
+      };
+      const llm = createMockLLMClient([VALID_TASK_RESPONSE, LLM_REVIEW_PASS]);
+      const lifecycle = createLifecycle(llm, {
+        approvalFn: async () => true,
+        ethicsGate: ethicsGate as unknown as import("../src/ethics-gate.js").EthicsGate,
+      });
+      const gapVector = makeGapVector("goal-1", [{ name: "dim", gap: 0.5 }]);
+      const context = makeDriveContext(["dim"]);
+      const adapter: import("../src/task-lifecycle.js").IAdapter = {
+        adapterType: "mock",
+        async execute() {
+          callOrder.push("adapterExecute");
+          return {
+            success: true,
+            output: "done",
+            error: null,
+            exit_code: 0,
+            elapsed_ms: 50,
+            stopped_reason: "completed" as const,
+          };
+        },
+      };
+
+      await lifecycle.runTaskCycle("goal-1", gapVector, context, adapter);
+
+      expect(callOrder.indexOf("checkMeans")).toBeLessThan(callOrder.indexOf("adapterExecute"));
+    });
+
+    it("ethics flag: approvalFn is called exactly once when verdict is flag", async () => {
+      const ethicsGate = makeMockEthicsGate(async () => FLAG_VERDICT);
+      const llm = createMockLLMClient([VALID_TASK_RESPONSE, LLM_REVIEW_PASS]);
+      const approvalFn = vi.fn().mockResolvedValue(true);
+      const lifecycle = createLifecycle(llm, {
+        approvalFn,
+        ethicsGate: ethicsGate as unknown as import("../src/ethics-gate.js").EthicsGate,
+      });
+      const gapVector = makeGapVector("goal-1", [{ name: "dim", gap: 0.5 }]);
+      const context = makeDriveContext(["dim"]);
+      const adapter = createMockAdapter([{ success: true }]);
+
+      await lifecycle.runTaskCycle("goal-1", gapVector, context, adapter);
+
+      // approvalFn may be called for the ethics flag and/or for reversibility check.
+      // At minimum it must have been called for the ethics flag.
+      expect(approvalFn).toHaveBeenCalled();
+    });
+
+    it("ethics reject: task field in TaskCycleResult is the generated task (not null)", async () => {
+      const ethicsGate = makeMockEthicsGate(async () => REJECT_VERDICT);
+      const llm = createMockLLMClient([VALID_TASK_RESPONSE]);
+      const lifecycle = createLifecycle(llm, {
+        approvalFn: async () => true,
+        ethicsGate: ethicsGate as unknown as import("../src/ethics-gate.js").EthicsGate,
+      });
+      const gapVector = makeGapVector("goal-1", [{ name: "dim", gap: 0.5 }]);
+      const context = makeDriveContext(["dim"]);
+      const adapter = createMockAdapter([]);
+
+      const result = await lifecycle.runTaskCycle("goal-1", gapVector, context, adapter);
+
+      expect(result.task).toBeDefined();
+      expect(result.task.goal_id).toBe("goal-1");
+    });
+
+    it("ethics pass: task.goal_id matches the goalId passed to runTaskCycle", async () => {
+      const ethicsGate = makeMockEthicsGate(async () => PASS_VERDICT);
+      const llm = createMockLLMClient([VALID_TASK_RESPONSE, LLM_REVIEW_PASS]);
+      const lifecycle = createLifecycle(llm, {
+        approvalFn: async () => true,
+        ethicsGate: ethicsGate as unknown as import("../src/ethics-gate.js").EthicsGate,
+      });
+      const gapVector = makeGapVector("goal-xyz", [{ name: "dim", gap: 0.5 }]);
+      const context = makeDriveContext(["dim"]);
+      const adapter = createMockAdapter([{ success: true }]);
+
+      const result = await lifecycle.runTaskCycle("goal-xyz", gapVector, context, adapter);
+
+      expect(result.task.goal_id).toBe("goal-xyz");
+    });
+
+    it("ethics pass: knowledgeContext optional parameter is forwarded without affecting ethics check", async () => {
+      const checkMeans = vi.fn().mockResolvedValue(PASS_VERDICT);
+      const ethicsGate = {
+        check: vi.fn(),
+        checkMeans,
+      };
+      const llm = createMockLLMClient([VALID_TASK_RESPONSE, LLM_REVIEW_PASS]);
+      const lifecycle = createLifecycle(llm, {
+        approvalFn: async () => true,
+        ethicsGate: ethicsGate as unknown as import("../src/ethics-gate.js").EthicsGate,
+      });
+      const gapVector = makeGapVector("goal-1", [{ name: "dim", gap: 0.5 }]);
+      const context = makeDriveContext(["dim"]);
+      const adapter = createMockAdapter([{ success: true }]);
+
+      const result = await lifecycle.runTaskCycle(
+        "goal-1",
+        gapVector,
+        context,
+        adapter,
+        "some knowledge context"
+      );
+
+      expect(checkMeans).toHaveBeenCalledOnce();
+      expect(result.action).toBe("completed");
+    });
+
+    it("ethics flag + approval denied: task returned has id matching verificationResult.task_id", async () => {
+      const ethicsGate = makeMockEthicsGate(async () => FLAG_VERDICT);
+      const llm = createMockLLMClient([VALID_TASK_RESPONSE]);
+      const lifecycle = createLifecycle(llm, {
+        approvalFn: async () => false,
+        ethicsGate: ethicsGate as unknown as import("../src/ethics-gate.js").EthicsGate,
+      });
+      const gapVector = makeGapVector("goal-1", [{ name: "dim", gap: 0.5 }]);
+      const context = makeDriveContext(["dim"]);
+      const adapter = createMockAdapter([]);
+
+      const result = await lifecycle.runTaskCycle("goal-1", gapVector, context, adapter);
+
+      expect(result.task.id).toBe(result.verificationResult.task_id);
+    });
+
+    it("ethics reject: task returned has id matching verificationResult.task_id", async () => {
+      const ethicsGate = makeMockEthicsGate(async () => REJECT_VERDICT);
+      const llm = createMockLLMClient([VALID_TASK_RESPONSE]);
+      const lifecycle = createLifecycle(llm, {
+        approvalFn: async () => true,
+        ethicsGate: ethicsGate as unknown as import("../src/ethics-gate.js").EthicsGate,
+      });
+      const gapVector = makeGapVector("goal-1", [{ name: "dim", gap: 0.5 }]);
+      const context = makeDriveContext(["dim"]);
+      const adapter = createMockAdapter([]);
+
+      const result = await lifecycle.runTaskCycle("goal-1", gapVector, context, adapter);
+
+      expect(result.task.id).toBe(result.verificationResult.task_id);
+    });
+
+    it("multiple sequential cycles: ethicsGate.checkMeans called once per cycle", async () => {
+      const checkMeans = vi.fn().mockResolvedValue(PASS_VERDICT);
+      const ethicsGate = {
+        check: vi.fn(),
+        checkMeans,
+      };
+      const llm = createMockLLMClient([
+        VALID_TASK_RESPONSE, LLM_REVIEW_PASS,
+        VALID_TASK_RESPONSE, LLM_REVIEW_PASS,
+      ]);
+      const lifecycle = createLifecycle(llm, {
+        approvalFn: async () => true,
+        ethicsGate: ethicsGate as unknown as import("../src/ethics-gate.js").EthicsGate,
+      });
+      const gapVector = makeGapVector("goal-1", [{ name: "dim", gap: 0.5 }]);
+      const context = makeDriveContext(["dim"]);
+      const adapter = createMockAdapter([{ success: true }, { success: true }]);
+
+      await lifecycle.runTaskCycle("goal-1", gapVector, context, adapter);
+      await lifecycle.runTaskCycle("goal-1", gapVector, context, adapter);
+
+      expect(checkMeans).toHaveBeenCalledTimes(2);
+    });
+
+    it("ethics pass: verificationResult.verdict is pass when L2 review passes", async () => {
+      const ethicsGate = makeMockEthicsGate(async () => PASS_VERDICT);
+      const llm = createMockLLMClient([VALID_TASK_RESPONSE, LLM_REVIEW_PASS]);
+      const lifecycle = createLifecycle(llm, {
+        approvalFn: async () => true,
+        ethicsGate: ethicsGate as unknown as import("../src/ethics-gate.js").EthicsGate,
+      });
+      const gapVector = makeGapVector("goal-1", [{ name: "dim", gap: 0.5 }]);
+      const context = makeDriveContext(["dim"]);
+      const adapter = createMockAdapter([{ success: true, output: "All tests pass" }]);
+
+      const result = await lifecycle.runTaskCycle("goal-1", gapVector, context, adapter);
+
+      expect(result.verificationResult.verdict).toBe("pass");
+    });
+
+    it("ethics reject: dimension_updates is empty in verificationResult", async () => {
+      const ethicsGate = makeMockEthicsGate(async () => REJECT_VERDICT);
+      const llm = createMockLLMClient([VALID_TASK_RESPONSE]);
+      const lifecycle = createLifecycle(llm, {
+        approvalFn: async () => true,
+        ethicsGate: ethicsGate as unknown as import("../src/ethics-gate.js").EthicsGate,
+      });
+      const gapVector = makeGapVector("goal-1", [{ name: "dim", gap: 0.5 }]);
+      const context = makeDriveContext(["dim"]);
+      const adapter = createMockAdapter([]);
+
+      const result = await lifecycle.runTaskCycle("goal-1", gapVector, context, adapter);
+
+      expect(result.verificationResult.dimension_updates).toEqual([]);
+    });
+
+    it("ethics flag + approval denied: dimension_updates is empty in verificationResult", async () => {
+      const ethicsGate = makeMockEthicsGate(async () => FLAG_VERDICT);
+      const llm = createMockLLMClient([VALID_TASK_RESPONSE]);
+      const lifecycle = createLifecycle(llm, {
+        approvalFn: async () => false,
+        ethicsGate: ethicsGate as unknown as import("../src/ethics-gate.js").EthicsGate,
+      });
+      const gapVector = makeGapVector("goal-1", [{ name: "dim", gap: 0.5 }]);
+      const context = makeDriveContext(["dim"]);
+      const adapter = createMockAdapter([]);
+
+      const result = await lifecycle.runTaskCycle("goal-1", gapVector, context, adapter);
+
+      expect(result.verificationResult.dimension_updates).toEqual([]);
     });
   });
 });

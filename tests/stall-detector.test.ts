@@ -567,3 +567,153 @@ describe("StallReport shape", () => {
     expect(result!.task_id).toBeNull();
   });
 });
+
+// ─── CharacterConfig integration — StallDetector ───
+
+describe("StallDetector CharacterConfig integration", () => {
+  let tempDir2: string;
+  let stateManager2: StateManager;
+
+  beforeEach(() => {
+    tempDir2 = makeTempDir();
+    stateManager2 = new StateManager(tempDir2);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tempDir2, { recursive: true, force: true });
+  });
+
+  it("constructor without characterConfig is backwards compatible (no error)", () => {
+    expect(() => new StallDetector(stateManager2)).not.toThrow();
+  });
+
+  it("default config (stall_flexibility=1) uses original N values — immediate=3", () => {
+    // stall_flexibility=1 → multiplier=1.0 → immediate N=3 (same as before)
+    const detectorDefault = new StallDetector(stateManager2);
+    // 4 flat entries → stall with immediate (N=3, need 4 entries)
+    const history = makeGapHistory([0.5, 0.5, 0.5, 0.5]);
+    const result = detectorDefault.checkDimensionStall("goal-1", "dim-a", history, "immediate");
+    expect(result).not.toBeNull();
+    expect(result!.stall_type).toBe("dimension_stall");
+  });
+
+  it("default config (stall_flexibility=1) — medium_term N=5, need 6 entries", () => {
+    const detectorDefault = new StallDetector(stateManager2);
+    const history = makeGapHistory([0.5, 0.5, 0.5, 0.5, 0.5, 0.5]);
+    const result = detectorDefault.checkDimensionStall("goal-1", "dim-a", history, "medium_term");
+    expect(result).not.toBeNull();
+  });
+
+  it("stall_flexibility=1 → N multiplier=1.0 (identical to no config)", () => {
+    const detectorFlex1 = new StallDetector(stateManager2, {
+      caution_level: 2,
+      stall_flexibility: 1,
+      communication_directness: 3,
+      proactivity_level: 2,
+    });
+    // immediate N=3 → need 4 entries
+    const history = makeGapHistory([0.5, 0.5, 0.5, 0.5]);
+    expect(detectorFlex1.checkDimensionStall("g", "d", history, "immediate")).not.toBeNull();
+  });
+
+  it("stall_flexibility=5 → multiplier=2.0 → immediate N=6 (need 7 entries)", () => {
+    const detectorFlex5 = new StallDetector(stateManager2, {
+      caution_level: 2,
+      stall_flexibility: 5,
+      communication_directness: 3,
+      proactivity_level: 2,
+    });
+    // immediate base N=3 → adjusted N=round(3*2.0)=6 → need 7 entries
+    // 4 flat entries: not enough data → null
+    const shortHistory = makeGapHistory([0.5, 0.5, 0.5, 0.5]);
+    expect(detectorFlex5.checkDimensionStall("g", "d", shortHistory, "immediate")).toBeNull();
+    // 7 flat entries: stall detected
+    const longHistory = makeGapHistory([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]);
+    expect(detectorFlex5.checkDimensionStall("g", "d", longHistory, "immediate")).not.toBeNull();
+  });
+
+  it("stall_flexibility=5 → long_term N=20 (need 21 entries)", () => {
+    const detectorFlex5 = new StallDetector(stateManager2, {
+      caution_level: 2,
+      stall_flexibility: 5,
+      communication_directness: 3,
+      proactivity_level: 2,
+    });
+    // long_term base N=10 → adjusted N=round(10*2.0)=20 → need 21 entries
+    // 11 flat entries: not enough data → null
+    const shortHistory = makeGapHistory(new Array(11).fill(0.5));
+    expect(detectorFlex5.checkDimensionStall("g", "d", shortHistory, "long_term")).toBeNull();
+    // 21 flat entries: stall detected
+    const longHistory = makeGapHistory(new Array(21).fill(0.5));
+    expect(detectorFlex5.checkDimensionStall("g", "d", longHistory, "long_term")).not.toBeNull();
+  });
+
+  it("CONSECUTIVE_FAILURE_THRESHOLD is unchanged at stall_flexibility=1 (threshold=3)", () => {
+    const detectorFlex1 = new StallDetector(stateManager2, {
+      caution_level: 2,
+      stall_flexibility: 1,
+      communication_directness: 3,
+      proactivity_level: 2,
+    });
+    expect(detectorFlex1.checkConsecutiveFailures("g", "d", 2)).toBeNull();
+    expect(detectorFlex1.checkConsecutiveFailures("g", "d", 3)).not.toBeNull();
+  });
+
+  it("CONSECUTIVE_FAILURE_THRESHOLD is unchanged at stall_flexibility=5 (threshold still=3)", () => {
+    const detectorFlex5 = new StallDetector(stateManager2, {
+      caution_level: 2,
+      stall_flexibility: 5,
+      communication_directness: 3,
+      proactivity_level: 2,
+    });
+    expect(detectorFlex5.checkConsecutiveFailures("g", "d", 2)).toBeNull();
+    expect(detectorFlex5.checkConsecutiveFailures("g", "d", 3)).not.toBeNull();
+  });
+
+  it("ESCALATION_CAP is unchanged at any stall_flexibility (caps at 3)", () => {
+    const detectorFlex5 = new StallDetector(stateManager2, {
+      caution_level: 2,
+      stall_flexibility: 5,
+      communication_directness: 3,
+      proactivity_level: 2,
+    });
+    detectorFlex5.incrementEscalation("g", "d");
+    detectorFlex5.incrementEscalation("g", "d");
+    detectorFlex5.incrementEscalation("g", "d");
+    const capped = detectorFlex5.incrementEscalation("g", "d");
+    expect(capped).toBe(3);
+  });
+
+  it("stall_flexibility=3 → multiplier=1.5 → medium_term N=round(5*1.5)=8", () => {
+    const detectorFlex3 = new StallDetector(stateManager2, {
+      caution_level: 2,
+      stall_flexibility: 3,
+      communication_directness: 3,
+      proactivity_level: 2,
+    });
+    // medium_term base N=5 → adjusted N=round(5*1.5)=8 → need 9 entries
+    // 6 flat entries: not enough → null
+    const shortHistory = makeGapHistory([0.5, 0.5, 0.5, 0.5, 0.5, 0.5]);
+    expect(detectorFlex3.checkDimensionStall("g", "d", shortHistory, "medium_term")).toBeNull();
+    // 9 flat entries: stall detected
+    const longHistory = makeGapHistory(new Array(9).fill(0.5));
+    expect(detectorFlex3.checkDimensionStall("g", "d", longHistory, "medium_term")).not.toBeNull();
+  });
+
+  it("constructor with explicit DEFAULT values identical to omitting characterConfig", () => {
+    const detectorDefault = new StallDetector(stateManager2);
+    const detectorExplicit = new StallDetector(stateManager2, {
+      caution_level: 2,
+      stall_flexibility: 1,
+      communication_directness: 3,
+      proactivity_level: 2,
+    });
+    // Both should behave identically for immediate stall (N=3, need 4 entries)
+    const history = makeGapHistory([0.5, 0.5, 0.5, 0.5]);
+    const r1 = detectorDefault.checkDimensionStall("g", "d", history, "immediate");
+    const r2 = detectorExplicit.checkDimensionStall("g", "d", history, "immediate");
+    expect(r1).not.toBeNull();
+    expect(r2).not.toBeNull();
+    expect(r1!.stall_type).toBe(r2!.stall_type);
+  });
+});

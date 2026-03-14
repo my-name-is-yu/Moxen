@@ -5,6 +5,7 @@ import * as os from "node:os";
 import { StateManager } from "../src/state-manager.js";
 import { ReportingEngine } from "../src/reporting-engine.js";
 import type { Report } from "../src/types/report.js";
+import type { CharacterConfig } from "../src/types/character.js";
 
 // ─── Test helpers ───
 
@@ -585,5 +586,300 @@ describe("edge cases", () => {
     engine.saveReport(r);
     const daily = engine.generateDailySummary("goal-001");
     expect(daily.content).toContain("Single loop");
+  });
+});
+
+// ─── CharacterConfig integration ───
+
+describe("CharacterConfig — constructor", () => {
+  it("constructor without characterConfig works (backwards compatible)", () => {
+    const eng = new ReportingEngine(stateManager);
+    const report = eng.generateExecutionSummary(makeBaseParams());
+    expect(report.report_type).toBe("execution_summary");
+    // Default proactivity=2 → normal mode → full format preserved
+    expect(report.content).toContain("## Execution Summary");
+    expect(report.content).toContain("### Observation Results");
+  });
+
+  it("default config (proactivity=2) preserves existing detailed behavior", () => {
+    const eng = new ReportingEngine(stateManager);
+    // Default proactivity=2 maps to normal (full format) — backwards compatible
+    const report = eng.generateExecutionSummary(makeBaseParams());
+    expect(report.content).toContain("## Execution Summary");
+    expect(report.content).toContain("### Observation Results");
+  });
+});
+
+describe("CharacterConfig — proactivity_level (execution summary verbosity)", () => {
+  it("proactivity=1: execution summary is brief (1-3 lines) for normal loop", () => {
+    const config: CharacterConfig = {
+      caution_level: 2,
+      stall_flexibility: 1,
+      communication_directness: 3,
+      proactivity_level: 1,
+    };
+    const eng = new ReportingEngine(stateManager, undefined, config);
+    const report = eng.generateExecutionSummary(makeBaseParams({
+      stallDetected: false,
+      pivotOccurred: false,
+      taskResult: { taskId: "t1", action: "run", dimension: "dim" },
+    }));
+    // Brief content should not contain full markdown headers
+    expect(report.content).not.toContain("## Execution Summary");
+    expect(report.content).not.toContain("### Observation Results");
+    // Should contain essential info
+    expect(report.content).toContain("Loop 1");
+    expect(report.content).toContain("gap:");
+  });
+
+  it("proactivity=5: execution summary is detailed (full format)", () => {
+    const config: CharacterConfig = {
+      caution_level: 2,
+      stall_flexibility: 1,
+      communication_directness: 3,
+      proactivity_level: 5,
+    };
+    const eng = new ReportingEngine(stateManager, undefined, config);
+    const report = eng.generateExecutionSummary(makeBaseParams());
+    expect(report.content).toContain("## Execution Summary");
+    expect(report.content).toContain("### Observation Results");
+    expect(report.content).toContain("### Gap Aggregate");
+    expect(report.content).toContain("### Task Result");
+    expect(report.content).toContain("### Status");
+    expect(report.content).toContain("### Elapsed Time");
+  });
+
+  it("proactivity=3: execution summary uses normal (full) format", () => {
+    const config: CharacterConfig = {
+      caution_level: 2,
+      stall_flexibility: 1,
+      communication_directness: 3,
+      proactivity_level: 3,
+    };
+    const eng = new ReportingEngine(stateManager, undefined, config);
+    const report = eng.generateExecutionSummary(makeBaseParams());
+    expect(report.content).toContain("## Execution Summary");
+    expect(report.content).toContain("### Observation Results");
+  });
+
+  it("proactivity=1 but stallDetected=true: still produces detailed output", () => {
+    const config: CharacterConfig = {
+      caution_level: 2,
+      stall_flexibility: 1,
+      communication_directness: 3,
+      proactivity_level: 1,
+    };
+    const eng = new ReportingEngine(stateManager, undefined, config);
+    const report = eng.generateExecutionSummary(makeBaseParams({
+      stallDetected: true,
+      pivotOccurred: false,
+      taskResult: { taskId: "t1", action: "run", dimension: "dim" },
+    }));
+    // Force detailed because stall is structural event
+    expect(report.content).toContain("## Execution Summary");
+    expect(report.content).toContain("**Stall detected**: Yes");
+    expect(report.content).toContain("### Observation Results");
+  });
+
+  it("proactivity=1 but pivotOccurred=true: still produces detailed output", () => {
+    const config: CharacterConfig = {
+      caution_level: 2,
+      stall_flexibility: 1,
+      communication_directness: 3,
+      proactivity_level: 1,
+    };
+    const eng = new ReportingEngine(stateManager, undefined, config);
+    const report = eng.generateExecutionSummary(makeBaseParams({
+      stallDetected: false,
+      pivotOccurred: true,
+      taskResult: { taskId: "t1", action: "run", dimension: "dim" },
+    }));
+    expect(report.content).toContain("## Execution Summary");
+    expect(report.content).toContain("**Strategy pivot**: Yes");
+  });
+
+  it("proactivity=1 but taskResult=null (completion-like): still produces detailed output", () => {
+    const config: CharacterConfig = {
+      caution_level: 2,
+      stall_flexibility: 1,
+      communication_directness: 3,
+      proactivity_level: 1,
+    };
+    const eng = new ReportingEngine(stateManager, undefined, config);
+    const report = eng.generateExecutionSummary(makeBaseParams({
+      stallDetected: false,
+      pivotOccurred: false,
+      taskResult: null,
+    }));
+    expect(report.content).toContain("## Execution Summary");
+    expect(report.content).toContain("No task executed");
+  });
+
+  it("proactivity=1: brief summary includes goal-relevant dimension names", () => {
+    const config: CharacterConfig = {
+      caution_level: 2,
+      stall_flexibility: 1,
+      communication_directness: 3,
+      proactivity_level: 1,
+    };
+    const eng = new ReportingEngine(stateManager, undefined, config);
+    const report = eng.generateExecutionSummary(makeBaseParams({
+      stallDetected: false,
+      pivotOccurred: false,
+      taskResult: { taskId: "t1", action: "run", dimension: "test_coverage" },
+    }));
+    // Brief mode still shows dimension names in compact format
+    expect(report.content).toContain("test_coverage");
+    expect(report.content).toContain("build_pass");
+  });
+});
+
+describe("CharacterConfig — communication_directness (notification suggestions)", () => {
+  it("directness=1: escalation notification includes suggestions section", () => {
+    const config: CharacterConfig = {
+      caution_level: 2,
+      stall_flexibility: 1,
+      communication_directness: 1,
+      proactivity_level: 2,
+    };
+    const eng = new ReportingEngine(stateManager, undefined, config);
+    const report = eng.generateNotification("stall_escalation", {
+      goalId: "goal-001",
+      message: "Stalled for 5 loops",
+    });
+    expect(report.content).toContain("Suggested next actions:");
+  });
+
+  it("directness=2: stall notification includes suggestions section", () => {
+    const config: CharacterConfig = {
+      caution_level: 2,
+      stall_flexibility: 1,
+      communication_directness: 2,
+      proactivity_level: 2,
+    };
+    const eng = new ReportingEngine(stateManager, undefined, config);
+    const report = eng.generateNotification("stall_escalation", {
+      goalId: "goal-001",
+      message: "Stalled",
+    });
+    expect(report.content).toContain("Suggested next actions:");
+  });
+
+  it("directness=1: capability_insufficient notification includes suggestions section", () => {
+    const config: CharacterConfig = {
+      caution_level: 2,
+      stall_flexibility: 1,
+      communication_directness: 1,
+      proactivity_level: 2,
+    };
+    const eng = new ReportingEngine(stateManager, undefined, config);
+    const report = eng.generateNotification("capability_insufficient", {
+      goalId: "goal-001",
+      message: "Cannot execute",
+    });
+    expect(report.content).toContain("Suggested next actions:");
+  });
+
+  it("directness=5: notifications have no suggestions section", () => {
+    const config: CharacterConfig = {
+      caution_level: 2,
+      stall_flexibility: 1,
+      communication_directness: 5,
+      proactivity_level: 2,
+    };
+    const eng = new ReportingEngine(stateManager, undefined, config);
+    const escalation = eng.generateNotification("stall_escalation", {
+      goalId: "goal-001",
+      message: "Stalled",
+    });
+    const stall = eng.generateNotification("capability_insufficient", {
+      goalId: "goal-001",
+      message: "Cannot execute",
+    });
+    expect(escalation.content).not.toContain("Suggested next actions:");
+    expect(stall.content).not.toContain("Suggested next actions:");
+  });
+
+  it("directness=4: notifications have no suggestions section", () => {
+    const config: CharacterConfig = {
+      caution_level: 2,
+      stall_flexibility: 1,
+      communication_directness: 4,
+      proactivity_level: 2,
+    };
+    const eng = new ReportingEngine(stateManager, undefined, config);
+    const report = eng.generateNotification("stall_escalation", {
+      goalId: "goal-001",
+      message: "Stalled",
+    });
+    expect(report.content).not.toContain("Suggested next actions:");
+  });
+
+  it("directness=3 (balanced): stall_escalation includes suggestions section", () => {
+    // stall_escalation IS an escalation (isEscalation=true, isStall=true)
+    // directness=3: suggest only for escalation where !isStall — so stall_escalation should NOT have suggestions
+    // Wait, the spec says directness=3: "Append suggestions only for escalation notifications"
+    // stall_escalation type maps to isEscalation=true AND isStall=true
+    // The code excludes stall from directness=3 suggestions.
+    // So directness=3 + stall_escalation => NO suggestions
+    const config: CharacterConfig = {
+      caution_level: 2,
+      stall_flexibility: 1,
+      communication_directness: 3,
+      proactivity_level: 2,
+    };
+    const eng = new ReportingEngine(stateManager, undefined, config);
+    const report = eng.generateNotification("stall_escalation", {
+      goalId: "goal-001",
+      message: "Stalled",
+    });
+    expect(report.content).not.toContain("Suggested next actions:");
+  });
+
+  it("directness=3 (balanced): capability_insufficient notification includes suggestions", () => {
+    // capability_insufficient: isEscalation=true, isStall=false → directness=3 should include suggestions
+    const config: CharacterConfig = {
+      caution_level: 2,
+      stall_flexibility: 1,
+      communication_directness: 3,
+      proactivity_level: 2,
+    };
+    const eng = new ReportingEngine(stateManager, undefined, config);
+    const report = eng.generateNotification("capability_insufficient", {
+      goalId: "goal-001",
+      message: "Cannot execute",
+    });
+    expect(report.content).toContain("Suggested next actions:");
+  });
+
+  it("directness=3 (balanced): urgent notification has no suggestions section", () => {
+    const config: CharacterConfig = {
+      caution_level: 2,
+      stall_flexibility: 1,
+      communication_directness: 3,
+      proactivity_level: 2,
+    };
+    const eng = new ReportingEngine(stateManager, undefined, config);
+    const report = eng.generateNotification("urgent", {
+      goalId: "goal-001",
+      message: "Urgent issue",
+    });
+    expect(report.content).not.toContain("Suggested next actions:");
+  });
+
+  it("default config (directness=3): escalation has suggestions, stall does not", () => {
+    // Default directness=3: capability_insufficient (escalation, not stall) → suggestions
+    //                        stall_escalation (stall) → no suggestions
+    const eng = new ReportingEngine(stateManager);
+    const escalation = eng.generateNotification("capability_insufficient", {
+      goalId: "goal-001",
+      message: "Cannot execute",
+    });
+    const stall = eng.generateNotification("stall_escalation", {
+      goalId: "goal-001",
+      message: "Stalled",
+    });
+    expect(escalation.content).toContain("Suggested next actions:");
+    expect(stall.content).not.toContain("Suggested next actions:");
   });
 });

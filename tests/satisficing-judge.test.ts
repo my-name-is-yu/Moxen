@@ -3,7 +3,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
 import { StateManager } from "../src/state-manager.js";
-import { SatisficingJudge } from "../src/satisficing-judge.js";
+import { SatisficingJudge, aggregateValues } from "../src/satisficing-judge.js";
 import type { Goal, Dimension } from "../src/types/goal.js";
 
 // ─── Test Fixtures ───
@@ -31,6 +31,7 @@ function makeDimension(overrides: Partial<Dimension> = {}): Dimension {
     weight: 1.0,
     uncertainty_weight: null,
     state_integrity: "ok",
+    dimension_mapping: null,
     ...overrides,
   };
 }
@@ -743,5 +744,505 @@ describe("propagateSubgoalCompletion", () => {
     expect(() =>
       judge.propagateSubgoalCompletion("subgoal-x", "nonexistent-parent")
     ).toThrow(/not found/);
+  });
+});
+
+// ─── aggregateValues (pure function unit tests) ───
+
+describe("aggregateValues", () => {
+  it("min: returns the smallest value", () => {
+    expect(aggregateValues([0.8, 0.5, 0.9], "min")).toBe(0.5);
+  });
+
+  it("min: single value returns that value", () => {
+    expect(aggregateValues([0.7], "min")).toBe(0.7);
+  });
+
+  it("max: returns the largest value", () => {
+    expect(aggregateValues([0.3, 0.9, 0.6], "max")).toBe(0.9);
+  });
+
+  it("max: single value returns that value", () => {
+    expect(aggregateValues([0.4], "max")).toBe(0.4);
+  });
+
+  it("avg: returns the mean of values", () => {
+    expect(aggregateValues([0.6, 0.8, 1.0], "avg")).toBeCloseTo(0.8);
+  });
+
+  it("avg: single value returns that value", () => {
+    expect(aggregateValues([0.75], "avg")).toBeCloseTo(0.75);
+  });
+
+  it("all_required: returns minimum fulfillment ratio (all meet threshold)", () => {
+    // values are fulfillment ratios; min=1.0 means all are complete
+    expect(aggregateValues([1.0, 1.0, 1.0], "all_required")).toBe(1.0);
+  });
+
+  it("all_required: returns minimum when not all complete", () => {
+    expect(aggregateValues([1.0, 0.7, 0.9], "all_required")).toBeCloseTo(0.7);
+  });
+
+  it("empty array returns 0 for all aggregation types", () => {
+    expect(aggregateValues([], "min")).toBe(0);
+    expect(aggregateValues([], "max")).toBe(0);
+    expect(aggregateValues([], "avg")).toBe(0);
+    expect(aggregateValues([], "all_required")).toBe(0);
+  });
+});
+
+// ─── propagateSubgoalCompletion Phase 2 (dimension_mapping aggregation) ───
+
+describe("propagateSubgoalCompletion Phase 2 — aggregation mapping", () => {
+  it("backwards compatibility: no dimension_mapping → behaves like MVP name matching", () => {
+    const parentGoal = makeGoal({
+      id: "parent-compat",
+      dimensions: [
+        makeDimension({
+          name: "feature-a",
+          current_value: 0,
+          threshold: { type: "min", value: 1 },
+          confidence: 0.9,
+        }),
+      ],
+    });
+    stateManager.saveGoal(parentGoal);
+
+    const subgoalDims: Dimension[] = [
+      makeDimension({
+        name: "feature-a",
+        current_value: 0.8,
+        threshold: { type: "min", value: 1 },
+        confidence: 0.9,
+        dimension_mapping: null,
+      }),
+    ];
+    judge.propagateSubgoalCompletion("feature-a", "parent-compat", subgoalDims);
+
+    const updated = stateManager.loadGoal("parent-compat");
+    const dim = updated!.dimensions.find((d) => d.name === "feature-a");
+    // Unmapped → name matching → sets to satisfied value (threshold=min 1 → value=1)
+    expect(dim!.current_value).toBe(1);
+  });
+
+  it("min aggregation: 3 subgoal dims map to same parent dim, min value is used", () => {
+    const parentGoal = makeGoal({
+      id: "parent-min",
+      dimensions: [
+        makeDimension({
+          name: "product_readiness",
+          current_value: 0,
+          threshold: { type: "min", value: 1 },
+          confidence: 0.9,
+        }),
+      ],
+    });
+    stateManager.saveGoal(parentGoal);
+
+    const subgoalDims: Dimension[] = [
+      makeDimension({
+        name: "feature_a",
+        current_value: 0.8,
+        threshold: { type: "min", value: 1 },
+        confidence: 0.9,
+        dimension_mapping: { parent_dimension: "product_readiness", aggregation: "min" },
+      }),
+      makeDimension({
+        name: "feature_b",
+        current_value: 0.5,
+        threshold: { type: "min", value: 1 },
+        confidence: 0.9,
+        dimension_mapping: { parent_dimension: "product_readiness", aggregation: "min" },
+      }),
+      makeDimension({
+        name: "feature_c",
+        current_value: 0.9,
+        threshold: { type: "min", value: 1 },
+        confidence: 0.9,
+        dimension_mapping: { parent_dimension: "product_readiness", aggregation: "min" },
+      }),
+    ];
+    judge.propagateSubgoalCompletion("subgoal-id", "parent-min", subgoalDims);
+
+    const updated = stateManager.loadGoal("parent-min");
+    const dim = updated!.dimensions.find((d) => d.name === "product_readiness");
+    expect(dim!.current_value).toBeCloseTo(0.5);
+  });
+
+  it("avg aggregation: 3 subgoal dims map to same parent dim, average is used", () => {
+    const parentGoal = makeGoal({
+      id: "parent-avg",
+      dimensions: [
+        makeDimension({
+          name: "overall_score",
+          current_value: 0,
+          threshold: { type: "min", value: 1 },
+          confidence: 0.9,
+        }),
+      ],
+    });
+    stateManager.saveGoal(parentGoal);
+
+    const subgoalDims: Dimension[] = [
+      makeDimension({
+        name: "score_a",
+        current_value: 0.6,
+        threshold: { type: "min", value: 1 },
+        confidence: 0.9,
+        dimension_mapping: { parent_dimension: "overall_score", aggregation: "avg" },
+      }),
+      makeDimension({
+        name: "score_b",
+        current_value: 0.8,
+        threshold: { type: "min", value: 1 },
+        confidence: 0.9,
+        dimension_mapping: { parent_dimension: "overall_score", aggregation: "avg" },
+      }),
+      makeDimension({
+        name: "score_c",
+        current_value: 1.0,
+        threshold: { type: "min", value: 1 },
+        confidence: 0.9,
+        dimension_mapping: { parent_dimension: "overall_score", aggregation: "avg" },
+      }),
+    ];
+    judge.propagateSubgoalCompletion("subgoal-id", "parent-avg", subgoalDims);
+
+    const updated = stateManager.loadGoal("parent-avg");
+    const dim = updated!.dimensions.find((d) => d.name === "overall_score");
+    // avg(0.6, 0.8, 1.0) = 0.8
+    expect(dim!.current_value).toBeCloseTo(0.8);
+  });
+
+  it("max aggregation: 3 subgoal dims map to same parent dim, max value is used", () => {
+    const parentGoal = makeGoal({
+      id: "parent-max",
+      dimensions: [
+        makeDimension({
+          name: "best_effort",
+          current_value: 0,
+          threshold: { type: "min", value: 1 },
+          confidence: 0.9,
+        }),
+      ],
+    });
+    stateManager.saveGoal(parentGoal);
+
+    const subgoalDims: Dimension[] = [
+      makeDimension({
+        name: "attempt_a",
+        current_value: 0.3,
+        threshold: { type: "min", value: 1 },
+        confidence: 0.9,
+        dimension_mapping: { parent_dimension: "best_effort", aggregation: "max" },
+      }),
+      makeDimension({
+        name: "attempt_b",
+        current_value: 0.9,
+        threshold: { type: "min", value: 1 },
+        confidence: 0.9,
+        dimension_mapping: { parent_dimension: "best_effort", aggregation: "max" },
+      }),
+      makeDimension({
+        name: "attempt_c",
+        current_value: 0.6,
+        threshold: { type: "min", value: 1 },
+        confidence: 0.9,
+        dimension_mapping: { parent_dimension: "best_effort", aggregation: "max" },
+      }),
+    ];
+    judge.propagateSubgoalCompletion("subgoal-id", "parent-max", subgoalDims);
+
+    const updated = stateManager.loadGoal("parent-max");
+    const dim = updated!.dimensions.find((d) => d.name === "best_effort");
+    expect(dim!.current_value).toBeCloseTo(0.9);
+  });
+
+  it("all_required: all subgoal dims meet threshold → parent gets min fulfillment ratio = 1.0", () => {
+    const parentGoal = makeGoal({
+      id: "parent-allreq-complete",
+      dimensions: [
+        makeDimension({
+          name: "release_gate",
+          current_value: 0,
+          threshold: { type: "min", value: 1 },
+          confidence: 0.9,
+        }),
+      ],
+    });
+    stateManager.saveGoal(parentGoal);
+
+    const subgoalDims: Dimension[] = [
+      makeDimension({
+        name: "tests_pass",
+        current_value: 1.0,
+        threshold: { type: "min", value: 1.0 },
+        confidence: 0.9,
+        dimension_mapping: { parent_dimension: "release_gate", aggregation: "all_required" },
+      }),
+      makeDimension({
+        name: "docs_done",
+        current_value: 1.0,
+        threshold: { type: "min", value: 1.0 },
+        confidence: 0.9,
+        dimension_mapping: { parent_dimension: "release_gate", aggregation: "all_required" },
+      }),
+    ];
+    judge.propagateSubgoalCompletion("subgoal-id", "parent-allreq-complete", subgoalDims);
+
+    const updated = stateManager.loadGoal("parent-allreq-complete");
+    const dim = updated!.dimensions.find((d) => d.name === "release_gate");
+    // Both fully satisfied → fulfillment ratios = [1.0, 1.0] → min = 1.0
+    expect(dim!.current_value).toBeCloseTo(1.0);
+  });
+
+  it("all_required partial: not all dims meet threshold → parent current_value reflects min ratio", () => {
+    const parentGoal = makeGoal({
+      id: "parent-allreq-partial",
+      dimensions: [
+        makeDimension({
+          name: "release_gate",
+          current_value: 0,
+          threshold: { type: "min", value: 1 },
+          confidence: 0.9,
+        }),
+      ],
+    });
+    stateManager.saveGoal(parentGoal);
+
+    const subgoalDims: Dimension[] = [
+      makeDimension({
+        name: "tests_pass",
+        current_value: 1.0,
+        threshold: { type: "min", value: 1.0 },
+        confidence: 0.9,
+        dimension_mapping: { parent_dimension: "release_gate", aggregation: "all_required" },
+      }),
+      makeDimension({
+        name: "docs_done",
+        current_value: 0.5,
+        threshold: { type: "min", value: 1.0 },
+        confidence: 0.9,
+        dimension_mapping: { parent_dimension: "release_gate", aggregation: "all_required" },
+      }),
+    ];
+    judge.propagateSubgoalCompletion("subgoal-id", "parent-allreq-partial", subgoalDims);
+
+    const updated = stateManager.loadGoal("parent-allreq-partial");
+    const dim = updated!.dimensions.find((d) => d.name === "release_gate");
+    // docs_done progress = 0.5/1.0 = 0.5 → min(1.0, 0.5) = 0.5 → parent not complete
+    expect(dim!.current_value).toBeCloseTo(0.5);
+    // Confirm parent dimension is not satisfied (0.5 < threshold 1)
+    expect(judge.isDimensionSatisfied(dim!).is_satisfied).toBe(false);
+  });
+
+  it("mixed mapping: mapped dims use aggregation, unmapped dims use name matching", () => {
+    const parentGoal = makeGoal({
+      id: "parent-mixed",
+      dimensions: [
+        makeDimension({
+          name: "product_readiness",
+          current_value: 0,
+          threshold: { type: "min", value: 1 },
+          confidence: 0.9,
+        }),
+        makeDimension({
+          name: "feature_x",
+          current_value: 0,
+          threshold: { type: "min", value: 1 },
+          confidence: 0.9,
+        }),
+      ],
+    });
+    stateManager.saveGoal(parentGoal);
+
+    const subgoalDims: Dimension[] = [
+      // mapped: goes to product_readiness via aggregation
+      makeDimension({
+        name: "feature_a",
+        current_value: 0.7,
+        threshold: { type: "min", value: 1 },
+        confidence: 0.9,
+        dimension_mapping: { parent_dimension: "product_readiness", aggregation: "min" },
+      }),
+      makeDimension({
+        name: "feature_b",
+        current_value: 0.9,
+        threshold: { type: "min", value: 1 },
+        confidence: 0.9,
+        dimension_mapping: { parent_dimension: "product_readiness", aggregation: "min" },
+      }),
+      // unmapped: name matching → matches "feature_x" in parent
+      makeDimension({
+        name: "feature_x",
+        current_value: 0.5,
+        threshold: { type: "min", value: 1 },
+        confidence: 0.9,
+        dimension_mapping: null,
+      }),
+    ];
+    judge.propagateSubgoalCompletion("subgoal-id", "parent-mixed", subgoalDims);
+
+    const updated = stateManager.loadGoal("parent-mixed");
+    const readinessDim = updated!.dimensions.find((d) => d.name === "product_readiness");
+    const featureXDim = updated!.dimensions.find((d) => d.name === "feature_x");
+
+    // mapped: min(0.7, 0.9) = 0.7
+    expect(readinessDim!.current_value).toBeCloseTo(0.7);
+    // unmapped: name matched → satisfied value = threshold = 1
+    expect(featureXDim!.current_value).toBe(1);
+  });
+
+  it("empty subgoalDimensions array → no updates made", () => {
+    const parentGoal = makeGoal({
+      id: "parent-empty-dims",
+      dimensions: [
+        makeDimension({
+          name: "some_dim",
+          current_value: 42,
+          threshold: { type: "min", value: 100 },
+          confidence: 0.9,
+        }),
+      ],
+    });
+    stateManager.saveGoal(parentGoal);
+
+    judge.propagateSubgoalCompletion("subgoal-id", "parent-empty-dims", []);
+
+    const updated = stateManager.loadGoal("parent-empty-dims");
+    // With empty array it falls through to MVP name matching; no name match → no update
+    expect(updated!.dimensions[0]!.current_value).toBe(42);
+  });
+
+  it("non-numeric current_value in avg mode: skips that dimension gracefully", () => {
+    const parentGoal = makeGoal({
+      id: "parent-nonnumeric",
+      dimensions: [
+        makeDimension({
+          name: "overall",
+          current_value: 0,
+          threshold: { type: "min", value: 1 },
+          confidence: 0.9,
+        }),
+      ],
+    });
+    stateManager.saveGoal(parentGoal);
+
+    const subgoalDims: Dimension[] = [
+      makeDimension({
+        name: "numeric_dim",
+        current_value: 0.6,
+        threshold: { type: "min", value: 1 },
+        confidence: 0.9,
+        dimension_mapping: { parent_dimension: "overall", aggregation: "avg" },
+      }),
+      makeDimension({
+        name: "string_dim",
+        current_value: "not-a-number",
+        threshold: { type: "min", value: 1 },
+        confidence: 0.9,
+        dimension_mapping: { parent_dimension: "overall", aggregation: "avg" },
+      }),
+      makeDimension({
+        name: "another_numeric",
+        current_value: 0.8,
+        threshold: { type: "min", value: 1 },
+        confidence: 0.9,
+        dimension_mapping: { parent_dimension: "overall", aggregation: "avg" },
+      }),
+    ];
+    // Should not throw; non-numeric string is skipped
+    expect(() =>
+      judge.propagateSubgoalCompletion("subgoal-id", "parent-nonnumeric", subgoalDims)
+    ).not.toThrow();
+
+    const updated = stateManager.loadGoal("parent-nonnumeric");
+    const dim = updated!.dimensions.find((d) => d.name === "overall");
+    // avg of [0.6, 0.8] (skipping "not-a-number") = 0.7
+    expect(dim!.current_value).toBeCloseTo(0.7);
+  });
+
+  it("multiple parent dimensions: different subgoal dims map to different parent dims", () => {
+    const parentGoal = makeGoal({
+      id: "parent-multiparent",
+      dimensions: [
+        makeDimension({
+          name: "dim_alpha",
+          current_value: 0,
+          threshold: { type: "min", value: 1 },
+          confidence: 0.9,
+        }),
+        makeDimension({
+          name: "dim_beta",
+          current_value: 0,
+          threshold: { type: "min", value: 1 },
+          confidence: 0.9,
+        }),
+      ],
+    });
+    stateManager.saveGoal(parentGoal);
+
+    const subgoalDims: Dimension[] = [
+      makeDimension({
+        name: "sub_a1",
+        current_value: 0.7,
+        threshold: { type: "min", value: 1 },
+        confidence: 0.9,
+        dimension_mapping: { parent_dimension: "dim_alpha", aggregation: "max" },
+      }),
+      makeDimension({
+        name: "sub_a2",
+        current_value: 0.9,
+        threshold: { type: "min", value: 1 },
+        confidence: 0.9,
+        dimension_mapping: { parent_dimension: "dim_alpha", aggregation: "max" },
+      }),
+      makeDimension({
+        name: "sub_b1",
+        current_value: 0.4,
+        threshold: { type: "min", value: 1 },
+        confidence: 0.9,
+        dimension_mapping: { parent_dimension: "dim_beta", aggregation: "min" },
+      }),
+      makeDimension({
+        name: "sub_b2",
+        current_value: 0.6,
+        threshold: { type: "min", value: 1 },
+        confidence: 0.9,
+        dimension_mapping: { parent_dimension: "dim_beta", aggregation: "min" },
+      }),
+    ];
+    judge.propagateSubgoalCompletion("subgoal-id", "parent-multiparent", subgoalDims);
+
+    const updated = stateManager.loadGoal("parent-multiparent");
+    const alpha = updated!.dimensions.find((d) => d.name === "dim_alpha");
+    const beta = updated!.dimensions.find((d) => d.name === "dim_beta");
+
+    // max(0.7, 0.9) = 0.9
+    expect(alpha!.current_value).toBeCloseTo(0.9);
+    // min(0.4, 0.6) = 0.4
+    expect(beta!.current_value).toBeCloseTo(0.4);
+  });
+
+  it("MVP path still works: propagation without subgoalDimensions argument uses name matching", () => {
+    const parentGoal = makeGoal({
+      id: "parent-mvp-path",
+      dimensions: [
+        makeDimension({
+          name: "subgoal-mvp",
+          current_value: 0,
+          threshold: { type: "min", value: 1 },
+          confidence: 0.9,
+        }),
+      ],
+    });
+    stateManager.saveGoal(parentGoal);
+
+    // Called without subgoalDimensions — uses original MVP signature
+    judge.propagateSubgoalCompletion("subgoal-mvp", "parent-mvp-path");
+
+    const updated = stateManager.loadGoal("parent-mvp-path");
+    const dim = updated!.dimensions.find((d) => d.name === "subgoal-mvp");
+    expect(dim!.current_value).toBe(1);
   });
 });

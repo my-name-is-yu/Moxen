@@ -18,11 +18,13 @@ import type {
   NegotiationLog,
   NegotiationResponse,
 } from "./types/negotiation.js";
+import type { CharacterConfig } from "./types/character.js";
+import { DEFAULT_CHARACTER_CONFIG } from "./types/character.js";
 
 // ─── Constants ───
 
 const FEASIBILITY_RATIO_THRESHOLD_REALISTIC = 1.5;
-const FEASIBILITY_RATIO_THRESHOLD_AMBITIOUS = 2.5;
+// FEASIBILITY_RATIO_THRESHOLD_AMBITIOUS is now dynamic — see getFeasibilityThreshold()
 const REALISTIC_TARGET_ACCELERATION_FACTOR = 1.3;
 const DEFAULT_TIME_HORIZON_DAYS = 90;
 
@@ -204,6 +206,7 @@ function decompositionToDimension(d: DimensionDecomposition): Dimension {
     weight: 1.0,
     uncertainty_weight: null,
     state_integrity: "ok",
+    dimension_mapping: null,
   };
 }
 
@@ -244,17 +247,29 @@ export class GoalNegotiator {
   private readonly llmClient: ILLMClient;
   private readonly ethicsGate: EthicsGate;
   private readonly observationEngine: ObservationEngine;
+  private readonly characterConfig: CharacterConfig;
 
   constructor(
     stateManager: StateManager,
     llmClient: ILLMClient,
     ethicsGate: EthicsGate,
-    observationEngine: ObservationEngine
+    observationEngine: ObservationEngine,
+    characterConfig?: CharacterConfig
   ) {
     this.stateManager = stateManager;
     this.llmClient = llmClient;
     this.ethicsGate = ethicsGate;
     this.observationEngine = observationEngine;
+    this.characterConfig = characterConfig ?? DEFAULT_CHARACTER_CONFIG;
+  }
+
+  /**
+   * Compute the feasibility ratio threshold for "ambitious" vs "infeasible".
+   * Driven by caution_level (1=conservative/strict → 2.0, 5=ambitious → 4.0).
+   * Formula: threshold = 1.5 + (caution_level * 0.5)
+   */
+  private getFeasibilityThreshold(): number {
+    return 1.5 + this.characterConfig.caution_level * 0.5;
   }
 
   // ─── negotiate() — 6-step flow ───
@@ -631,7 +646,7 @@ export class GoalNegotiator {
         let assessment: "realistic" | "ambitious" | "infeasible";
         if (feasibilityRatio <= FEASIBILITY_RATIO_THRESHOLD_REALISTIC) {
           assessment = "realistic";
-        } else if (feasibilityRatio <= FEASIBILITY_RATIO_THRESHOLD_AMBITIOUS) {
+        } else if (feasibilityRatio <= this.getFeasibilityThreshold()) {
           assessment = "ambitious";
         } else {
           assessment = "infeasible";

@@ -1,6 +1,6 @@
 # Implementation Status
 
-Implementation Phase — Stage 1-10 complete (1439 tests, 30 test files).
+Implementation Phase — Stage 1-11 complete (1749 tests, 35 test files).
 
 ## Stage 1 (complete)
 - Type definitions: 14 Zod schema files in `src/types/`
@@ -53,3 +53,27 @@ Implementation Phase — Stage 1-10 complete (1439 tests, 30 test files).
 - `src/types/daemon.ts`, `src/types/notification.ts`, `src/types/memory-lifecycle.ts` — 3 new Zod schema files (total: 20)
 - CLI: 3 new subcommands (start, stop, cron) added to `src/cli-runner.ts`
 - 1439 tests passing across 30 test files
+
+## Stage 11 (complete)
+
+### Phase 11A: 倫理ゲート Layer 1 + タスク手段チェック
+- `src/ethics-gate.ts` extensions — Layer 1 category-based blocklist (6 categories: 違法行為、加害、プライバシー侵害、欺瞞、セキュリティ侵害、差別自動化); fast pre-filter before Layer 2 LLM judgment
+- `src/types/ethics.ts` — ethics_constraints schema for user-customizable additional restrictions
+- `src/task-lifecycle.ts` integration — `checkMeans()` wired into task approval flow
+
+### Phase 11B: キャラクターカスタマイズ + 満足化 Phase 2
+- `src/types/character.ts` — CharacterConfig schema (4-axis: caution_level, stall_flexibility, communication_directness, proactivity_level)
+- `src/character-config.ts` — CharacterConfigManager: load/save/validate character profiles
+- `src/goal-negotiator.ts`, `src/stall-detector.ts`, `src/reporting-engine.ts` — character parameter reflection
+- `tests/character-separation.test.ts` — separation guarantee: character changes do not affect structural constraints
+- `src/satisficing-judge.ts` extensions — full aggregation mapping coverage (min/avg/max/all_required)
+- `src/types/goal.ts` extensions — aggregation_mode field additions
+
+### Phase 11C: 好奇心メカニズム MVP
+- `src/types/curiosity.ts` — CuriosityConfig, CuriosityGoal, LearningFeedback Zod schemas
+- `src/curiosity-engine.ts` — 5 trigger conditions (task queue empty, unexpected observation, repeated failure, undefined problem, periodic exploration); LLM-based curiosity goal generation with approval flow; 4 learning feedback patterns (high-impact priority, failure reframing, cross-goal transfer, blind-spot detection); resource budget constraints (20%/50%/100%)
+- `src/core-loop.ts` extensions — optional CuriosityEngine integration
+- `src/cli-runner.ts`, `src/index.ts` — CuriosityEngine exports and CLI wiring
+- New test files: `tests/curiosity-engine.test.ts`, `tests/character-config.test.ts`, `tests/character-separation.test.ts`
+- Updates to: `tests/core-loop.test.ts`, `tests/ethics-gate.test.ts`, `tests/event-server.test.ts`, `tests/goal-negotiator.test.ts`, `tests/reporting-engine.test.ts`, `tests/satisficing-judge.test.ts`, `tests/stall-detector.test.ts`, `tests/task-lifecycle.test.ts`
+- 1749 tests passing across 35 test files
