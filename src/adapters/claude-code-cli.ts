@@ -22,9 +22,11 @@ export class ClaudeCodeCLIAdapter implements IAdapter {
    * Override in tests to point at a different binary (e.g. "echo").
    */
   private readonly cliPath: string;
+  private readonly workDir: string | undefined;
 
-  constructor(cliPath: string = "claude") {
+  constructor(cliPath: string = "claude", workDir?: string) {
     this.cliPath = cliPath;
+    this.workDir = workDir;
   }
 
   async execute(task: AgentTask): Promise<AgentResult> {
@@ -37,6 +39,7 @@ export class ClaudeCodeCLIAdapter implements IAdapter {
 
       const child = spawn(this.cliPath, spawnArgs, {
         stdio: ["pipe", "pipe", "pipe"],
+        ...(this.workDir ? { cwd: this.workDir } : {}),
       });
 
       let stdout = "";
