@@ -23,6 +23,8 @@ import type { CapabilityAcquisitionTask } from "./types/capability.js";
 import type { AgentTask, AgentResult, IAdapter } from "./adapter-layer.js";
 export type { AgentTask, AgentResult, IAdapter };
 
+const DEBUG = process.env.MOTIVA_DEBUG === "true";
+
 // ─── Internal types ───
 
 export interface ExecutorReport {
@@ -316,6 +318,30 @@ export class TaskLifecycle {
     // Execute
     let result: AgentResult;
     try {
+      // Generic dedup check — any adapter may optionally implement checkDuplicate
+      if ('checkDuplicate' in adapter && typeof (adapter as unknown as Record<string, unknown>).checkDuplicate === 'function') {
+        try {
+          const isDuplicate = await (adapter as unknown as { checkDuplicate: (t: AgentTask) => Promise<boolean> }).checkDuplicate(agentTask);
+          if (isDuplicate) {
+            // Return synthetic result — task already exists, skip execution
+            result = {
+              success: true,
+              output: 'Skipped: duplicate task detected by adapter',
+              error: null,
+              exit_code: 0,
+              elapsed_ms: 0,
+              stopped_reason: 'completed',
+            };
+            // End session and update task status without calling adapter.execute
+            const skipSummary = 'Task skipped: duplicate detected by adapter';
+            this.sessionManager.endSession(session.id, skipSummary);
+            const skipNow = new Date().toISOString();
+            const skippedTask = { ...runningTask, status: 'completed' as const, completed_at: skipNow };
+            this.stateManager.writeRaw(`tasks/${task.goal_id}/${task.id}.json`, skippedTask);
+            return result;
+          }
+        } catch { /* non-fatal: proceed with execution if dedup check fails */ }
+      }
       result = await adapter.execute(agentTask);
     } catch (err) {
       result = {
@@ -848,9 +874,9 @@ export class TaskLifecycle {
     }
 
     // 4. Execute task
-    console.log(`[DEBUG-TL] Executing task ${task.id} via adapter ${adapter.adapterType}`);
+    if (DEBUG) console.log(`[DEBUG-TL] Executing task ${task.id} via adapter ${adapter.adapterType}`);
     const executionResult = await this.executeTask(task, adapter);
-    console.log(`[DEBUG-TL] Execution result: success=${executionResult.success}, stopped=${executionResult.stopped_reason}, error=${executionResult.error}, output=${executionResult.output?.substring(0, 200)}`);
+    if (DEBUG) console.log(`[DEBUG-TL] Execution result: success=${executionResult.success}, stopped=${executionResult.stopped_reason}, error=${executionResult.error}, output=${executionResult.output?.substring(0, 200)}`);
 
     // Reload task from disk to get accurate status/started_at/completed_at set by executeTask
     let taskForVerification = task;
@@ -861,7 +887,7 @@ export class TaskLifecycle {
 
     // 5. Verify task
     const verificationResult = await this.verifyTask(taskForVerification, executionResult);
-    console.log(`[DEBUG-TL] Verification: verdict=${verificationResult.verdict}, evidence=${verificationResult.evidence.map(e => e.description).join('; ').substring(0, 300)}`);
+    if (DEBUG) console.log(`[DEBUG-TL] Verification: verdict=${verificationResult.verdict}, evidence=${verificationResult.evidence.map(e => e.description).join('; ').substring(0, 300)}`);
 
     // 6. Handle verdict
     const verdictResult = await this.handleVerdict(taskForVerification, verificationResult);

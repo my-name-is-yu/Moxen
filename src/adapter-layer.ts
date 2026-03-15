@@ -39,6 +39,8 @@ export interface IAdapter {
   readonly capabilities?: readonly string[];
   /** Optional: return titles of existing tasks for dedup context injection into prompts. */
   listExistingTasks?(): Promise<string[]>;
+  /** Optional: adapter-specific duplicate detection. Returns true if a duplicate exists. Fail-open: return false on error. */
+  checkDuplicate?(task: AgentTask): Promise<boolean>;
 }
 
 // ─── AdapterRegistry ───

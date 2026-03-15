@@ -284,6 +284,52 @@ describe("getAdapterCapabilities", () => {
   });
 });
 
+// ─── IAdapter.checkDuplicate optional method ───
+
+describe("IAdapter checkDuplicate optional method", () => {
+  it("allows IAdapter without checkDuplicate (optional field)", () => {
+    const adapter: IAdapter = {
+      adapterType: "plain",
+      async execute(_task: AgentTask): Promise<AgentResult> {
+        return { success: true, output: "", error: null, exit_code: 0, elapsed_ms: 0, stopped_reason: "completed" };
+      },
+    };
+    // checkDuplicate is optional; absence must not cause a type error at runtime
+    expect(adapter.checkDuplicate).toBeUndefined();
+  });
+
+  it("allows IAdapter with checkDuplicate implemented", async () => {
+    const task: AgentTask = { prompt: "Fix bug", timeout_ms: 5000, adapter_type: "dedup_adapter" };
+    const adapter: IAdapter = {
+      adapterType: "dedup_adapter",
+      async execute(_task: AgentTask): Promise<AgentResult> {
+        return { success: true, output: "", error: null, exit_code: 0, elapsed_ms: 0, stopped_reason: "completed" };
+      },
+      async checkDuplicate(_task: AgentTask): Promise<boolean> {
+        return true;
+      },
+    };
+    expect(adapter.checkDuplicate).toBeDefined();
+    const result = await adapter.checkDuplicate!(task);
+    expect(result).toBe(true);
+  });
+
+  it("checkDuplicate returns false to signal no duplicate (fail-open contract)", async () => {
+    const task: AgentTask = { prompt: "New task", timeout_ms: 5000, adapter_type: "dedup_adapter" };
+    const adapter: IAdapter = {
+      adapterType: "dedup_adapter",
+      async execute(_task: AgentTask): Promise<AgentResult> {
+        return { success: true, output: "", error: null, exit_code: 0, elapsed_ms: 0, stopped_reason: "completed" };
+      },
+      async checkDuplicate(_task: AgentTask): Promise<boolean> {
+        return false;
+      },
+    };
+    const result = await adapter.checkDuplicate!(task);
+    expect(result).toBe(false);
+  });
+});
+
 // ─── ClaudeCodeCLIAdapter ───
 
 describe("ClaudeCodeCLIAdapter", () => {

@@ -58,15 +58,20 @@ function buildDecompositionPrompt(
 
   const dataSourcesSection =
     availableDataSources && availableDataSources.length > 0
-      ? `\nAvailable Data Sources (PREFER using these dimension names where applicable):\n${availableDataSources.map((ds) => `- "${ds.name}" provides: ${ds.dimensions.join(", ")}`).join("\n")}\nWhen a DataSource dimension closely matches a goal concept, use that exact dimension name. You MAY also add goal-specific dimensions that are NOT in the DataSource list — these will be observed via LLM-based review instead of mechanical observation.\n`
+      ? `CRITICAL CONSTRAINT: When available data source dimensions are listed below, you MUST use those exact dimension names as your decomposition dimensions. Do NOT invent new dimension names if a data source dimension exists that measures the same concept. Map your dimensions 1:1 to data source dimensions whenever possible. Only create new dimension names for concepts that have NO matching data source dimension.
+
+Available Data Sources and their exact dimension names:
+${availableDataSources.map((ds) => `- "${ds.name}" provides: ${ds.dimensions.join(", ")}`).join("\n")}
+
+`
       : "";
 
-  return `Decompose the following goal into measurable dimensions.
+  return `${dataSourcesSection}Decompose the following goal into measurable dimensions.
 
 Goal: ${description}${constraintsSection}
-${dataSourcesSection}
+
 For each dimension, provide:
-- name: a snake_case identifier (prefer a DataSource dimension name if one fits, otherwise use a descriptive custom name)
+- name: a snake_case identifier (use an exact DataSource dimension name if one fits, otherwise use a descriptive custom name)
 - label: human-readable label
 - threshold_type: one of "min", "max", "range", "present", "match"
 - threshold_value: the target value (number, string, or boolean), or null if not yet determined

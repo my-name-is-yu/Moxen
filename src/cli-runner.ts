@@ -87,13 +87,14 @@ export class CLIRunner {
   private buildApprovalFn(rl: readline.Interface): (task: Task) => Promise<boolean> {
     return (task: Task): Promise<boolean> => {
       return new Promise((resolve) => {
-        console.log("\n--- Approval Required ---");
-        console.log(`Task: ${task.work_description}`);
-        console.log(`Rationale: ${task.rationale}`);
-        console.log(`Reversibility: ${task.reversibility}`);
-        process.stdout.write("Approve this task? [y/N] ");
-
-        rl.once("line", (answer) => {
+        rl.pause();
+        process.stdout.write("\n--- Approval Required ---\n");
+        process.stdout.write(`Task: ${task.work_description}\n`);
+        process.stdout.write(`Rationale: ${task.rationale}\n`);
+        process.stdout.write(`Reversibility: ${task.reversibility}\n`);
+        rl.resume();
+        rl.question("Approve this task? [y/N] ", (answer) => {
+          process.stdout.write("\n");
           resolve(answer.trim().toLowerCase() === "y");
         });
       });

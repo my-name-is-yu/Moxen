@@ -181,6 +181,18 @@ export class GitHubIssueAdapter implements IAdapter {
   }
 
   /**
+   * IAdapter.checkDuplicate — returns true if an open issue with a similar title already
+   * exists. Delegates to checkOpenIssueExists, which is already fail-open (returns null
+   * on any error), so this method always returns false on error.
+   */
+  async checkDuplicate(task: AgentTask): Promise<boolean> {
+    const parsed = this.parsePrompt(task.prompt);
+    if (!parsed.title) return false;
+    const issueNumber = await this.checkOpenIssueExists(parsed.title);
+    return issueNumber !== null;
+  }
+
+  /**
    * Return titles of all open issues labelled with the default label (e.g. "motiva").
    * Used by CoreLoop to inject existing task context into the prompt so the LLM can
    * avoid creating duplicates.

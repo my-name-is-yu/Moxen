@@ -499,3 +499,60 @@ describe("GitHubIssueAdapter.execute dedup", () => {
     expect(result.output).toContain("https://github.com/owner/repo/issues/99");
   });
 });
+
+// ─── checkDuplicate tests ───
+
+describe("GitHubIssueAdapter.checkDuplicate", () => {
+  beforeEach(() => {
+    mockSpawn.mockReset();
+  });
+
+  it("returns true when a matching open issue exists", async () => {
+    const adapter = new GitHubIssueAdapter({ repo: "owner/repo" });
+    const child = makeFakeChild();
+
+    const issues = [{ number: 7, title: "Fix login bug" }];
+    const promise = adapter.checkDuplicate(makeTask({ prompt: "Fix login bug\nDetailed description." }));
+    child.stdout.emit("data", Buffer.from(JSON.stringify(issues)));
+    child.emit("close", 0);
+
+    const result = await promise;
+    expect(result).toBe(true);
+  });
+
+  it("returns false when no matching issue exists", async () => {
+    const adapter = new GitHubIssueAdapter({ repo: "owner/repo" });
+    const child = makeFakeChild();
+
+    const promise = adapter.checkDuplicate(makeTask({ prompt: "Add new feature\nSome details." }));
+    child.stdout.emit("data", Buffer.from(JSON.stringify([])));
+    child.emit("close", 0);
+
+    const result = await promise;
+    expect(result).toBe(false);
+  });
+
+  it("returns false on spawn error (fail-open)", async () => {
+    const adapter = new GitHubIssueAdapter({ repo: "owner/repo" });
+    const child = makeFakeChild();
+
+    const promise = adapter.checkDuplicate(makeTask({ prompt: "Fix something\nDetails." }));
+    child.emit("error", new Error("gh not found"));
+
+    const result = await promise;
+    expect(result).toBe(false);
+  });
+
+  it("returns false when gh returns no matching issues for a minimal prompt", async () => {
+    const adapter = new GitHubIssueAdapter({ repo: "owner/repo" });
+    const child = makeFakeChild();
+
+    // An empty prompt falls back to title "(no title)" — still triggers a search
+    const promise = adapter.checkDuplicate(makeTask({ prompt: "" }));
+    child.stdout.emit("data", Buffer.from(JSON.stringify([])));
+    child.emit("close", 0);
+
+    const result = await promise;
+    expect(result).toBe(false);
+  });
+});

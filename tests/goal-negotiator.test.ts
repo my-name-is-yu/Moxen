@@ -1554,6 +1554,129 @@ describe("GoalNegotiator", () => {
       expect(result.goal.confidence_flag).toBe("low");
     });
   });
+
+  // ─── buildDecompositionPrompt — DataSource dimension placement ───
+
+  describe("buildDecompositionPrompt DataSource placement", () => {
+    it("DataSource dimensions appear before the example JSON when DataSources are available", async () => {
+      // We capture the prompt by inspecting what the LLM client receives.
+      let capturedPrompt = "";
+      let callCount = 0;
+      const capturingLLM = {
+        async sendMessage(messages: Array<{ role: string; content: string }>, _options?: unknown): Promise<{ content: string; usage: { input_tokens: number; output_tokens: number }; stop_reason: string }> {
+          callCount++;
+          if (callCount === 2) {
+            // The decomposition call is the 2nd LLM call (after ethics check)
+            capturedPrompt = messages[0]?.content ?? "";
+          }
+          // Return canned responses in order
+          const responses: Record<number, string> = {
+            1: PASS_VERDICT,
+            2: SINGLE_DIMENSION_RESPONSE,
+            3: FEASIBILITY_REALISTIC,
+            4: RESPONSE_MESSAGE_ACCEPT,
+          };
+          const content = responses[callCount] ?? RESPONSE_MESSAGE_ACCEPT;
+          return { content, usage: { input_tokens: 10, output_tokens: content.length }, stop_reason: "end_turn" };
+        },
+        parseJSON<T>(content: string, schema: { parse: (v: unknown) => T }): T {
+          return schema.parse(JSON.parse(content.trim()));
+        },
+      };
+
+      // Register a DataSource with known dimension names on the ObservationEngine
+      // We do this by calling registerDataSource directly via stateManager
+      // The simplest approach: use a mock ObservationEngine that returns a known dimension list
+      const mockObsEngine = {
+        getAvailableDimensionInfo(): Array<{ name: string; dimensions: string[] }> {
+          return [{ name: "github_issues", dimensions: ["open_issue_count", "closed_issue_count", "completion_ratio"] }];
+        },
+      } as unknown as ObservationEngine;
+
+      const ethicsGate = new EthicsGate(stateManager, capturingLLM as never);
+      const negotiator = new GoalNegotiator(stateManager, capturingLLM as never, ethicsGate, mockObsEngine);
+
+      await negotiator.negotiate("Improve project completion");
+
+      // The DataSource section should appear BEFORE "Return a JSON array of dimension objects. Example:"
+      const dsIndex = capturedPrompt.indexOf("CRITICAL CONSTRAINT");
+      const exampleIndex = capturedPrompt.indexOf("Return a JSON array of dimension objects. Example:");
+      expect(dsIndex).toBeGreaterThanOrEqual(0);
+      expect(exampleIndex).toBeGreaterThan(dsIndex);
+    });
+
+    it("DataSource CRITICAL CONSTRAINT text appears in prompt when DataSources are available", async () => {
+      let capturedPrompt = "";
+      let callCount = 0;
+      const capturingLLM = {
+        async sendMessage(messages: Array<{ role: string; content: string }>, _options?: unknown): Promise<{ content: string; usage: { input_tokens: number; output_tokens: number }; stop_reason: string }> {
+          callCount++;
+          if (callCount === 2) {
+            capturedPrompt = messages[0]?.content ?? "";
+          }
+          const responses: Record<number, string> = {
+            1: PASS_VERDICT,
+            2: SINGLE_DIMENSION_RESPONSE,
+            3: FEASIBILITY_REALISTIC,
+            4: RESPONSE_MESSAGE_ACCEPT,
+          };
+          const content = responses[callCount] ?? RESPONSE_MESSAGE_ACCEPT;
+          return { content, usage: { input_tokens: 10, output_tokens: content.length }, stop_reason: "end_turn" };
+        },
+        parseJSON<T>(content: string, schema: { parse: (v: unknown) => T }): T {
+          return schema.parse(JSON.parse(content.trim()));
+        },
+      };
+
+      const mockObsEngine = {
+        getAvailableDimensionInfo(): Array<{ name: string; dimensions: string[] }> {
+          return [{ name: "sensor_feed", dimensions: ["temperature_celsius", "humidity_percent"] }];
+        },
+      } as unknown as ObservationEngine;
+
+      const ethicsGate = new EthicsGate(stateManager, capturingLLM as never);
+      const negotiator = new GoalNegotiator(stateManager, capturingLLM as never, ethicsGate, mockObsEngine);
+
+      await negotiator.negotiate("Maintain comfortable environment");
+
+      expect(capturedPrompt).toContain("CRITICAL CONSTRAINT");
+      expect(capturedPrompt).toContain("you MUST use those exact dimension names");
+      expect(capturedPrompt).toContain("temperature_celsius");
+      expect(capturedPrompt).toContain("humidity_percent");
+    });
+
+    it("no DataSource section in prompt when no DataSources are registered", async () => {
+      let capturedPrompt = "";
+      let callCount = 0;
+      const capturingLLM = {
+        async sendMessage(messages: Array<{ role: string; content: string }>, _options?: unknown): Promise<{ content: string; usage: { input_tokens: number; output_tokens: number }; stop_reason: string }> {
+          callCount++;
+          if (callCount === 2) {
+            capturedPrompt = messages[0]?.content ?? "";
+          }
+          const responses: Record<number, string> = {
+            1: PASS_VERDICT,
+            2: SINGLE_DIMENSION_RESPONSE,
+            3: FEASIBILITY_REALISTIC,
+            4: RESPONSE_MESSAGE_ACCEPT,
+          };
+          const content = responses[callCount] ?? RESPONSE_MESSAGE_ACCEPT;
+          return { content, usage: { input_tokens: 10, output_tokens: content.length }, stop_reason: "end_turn" };
+        },
+        parseJSON<T>(content: string, schema: { parse: (v: unknown) => T }): T {
+          return schema.parse(JSON.parse(content.trim()));
+        },
+      };
+
+      // observationEngine has no registered DataSources — getAvailableDimensionInfo() returns []
+      const ethicsGate = new EthicsGate(stateManager, capturingLLM as never);
+      const negotiator = new GoalNegotiator(stateManager, capturingLLM as never, ethicsGate, observationEngine);
+
+      await negotiator.negotiate("Simple goal with no data sources");
+
+      expect(capturedPrompt).not.toContain("CRITICAL CONSTRAINT");
+    });
+  });
 });
 
 // ─── CharacterConfig integration — GoalNegotiator ───
