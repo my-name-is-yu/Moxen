@@ -36,6 +36,7 @@ export interface IDataSourceAdapter {
   query(params: DataSourceQuery): Promise<DataSourceResult>;
   disconnect(): Promise<void>;
   healthCheck(): Promise<boolean>;
+  getSupportedDimensions?(): string[];
 }
 
 // ─── FileDataSourceAdapter ───

@@ -245,11 +245,12 @@ export class CoreLoop {
       };
     }
 
-    // Reset stall state at the beginning of each run so prior run's escalation
-    // does not immediately poison a fresh start.
+    // Reset stall state AND gap history at the beginning of each run so prior
+    // run's escalation and stale gap entries do not immediately poison a fresh start.
     for (const dim of goal.dimensions) {
       this.deps.stallDetector.resetEscalation(goalId, dim.name);
     }
+    this.deps.stateManager.saveGapHistory(goalId, []);
 
     const iterations: LoopIterationResult[] = [];
     let consecutiveErrors = 0;
@@ -449,26 +450,58 @@ export class CoreLoop {
     }
 
     // ─── 2. Observe ───
-    // Build self_report observation methods from goal dimensions and observe.
+    // First, try to observe from registered data sources (mechanical layer).
+    // If a data source is available for a dimension, use it for higher-quality
+    // observation. Fall back to self_report for dimensions without data sources.
     try {
-      const methods = goal.dimensions.map((dim) => ({
-        type: "manual" as const,
-        source: `self_report:${dim.name}`,
-        schedule: null,
-        endpoint: null,
-        confidence_tier: "self_report" as const,
-      }));
-      // observe() is an extension point; call it if available on the engine
       const engine = this.deps.observationEngine as unknown as {
         observe?: (goalId: string, methods: unknown[]) => Promise<void> | void;
+        observeFromDataSource?: (goalId: string, dimensionName: string, sourceId: string) => Promise<unknown>;
+        getDataSources?: () => Array<{ sourceId: string }>;
       };
-      if (typeof engine.observe === "function") {
-        await engine.observe(goalId, methods);
-        // Reload goal after observation to pick up any updates
-        const reloaded = this.deps.stateManager.loadGoal(goalId);
-        if (reloaded) {
-          goal = reloaded;
+
+      // Build a set of data source IDs available on the observation engine
+      console.log(`[DEBUG] engine.getDataSources exists: ${typeof engine.getDataSources === "function"}`);
+      const dataSources = typeof engine.getDataSources === "function"
+        ? engine.getDataSources()
+        : [];
+
+      const observedDimensions = new Set<string>();
+
+      console.log(`[DEBUG] dataSources.length: ${dataSources.length}, observeFromDataSource exists: ${typeof engine.observeFromDataSource === "function"}`);
+      if (dataSources.length > 0 && typeof engine.observeFromDataSource === "function") {
+        // Try each dimension against available data sources
+        for (const dim of goal.dimensions) {
+          for (const ds of dataSources) {
+            try {
+              await engine.observeFromDataSource(goalId, dim.name, ds.sourceId);
+              observedDimensions.add(dim.name);
+              break; // This dimension is covered — move on to the next
+            } catch (dsErr) {
+              // This data source cannot observe this dimension — try next source
+              console.warn(`CoreLoop: DataSource observation failed for dim="${dim.name}" source="${ds.sourceId}": ${dsErr instanceof Error ? dsErr.message : String(dsErr)}`);
+            }
+          }
         }
+      }
+
+      // Fall back to self_report only for dimensions not covered by a data source
+      const unobservedDims = goal.dimensions.filter((dim) => !observedDimensions.has(dim.name));
+      if (unobservedDims.length > 0 && typeof engine.observe === "function") {
+        const methods = unobservedDims.map((dim) => ({
+          type: "manual" as const,
+          source: `self_report:${dim.name}`,
+          schedule: null,
+          endpoint: null,
+          confidence_tier: "self_report" as const,
+        }));
+        await engine.observe(goalId, methods);
+      }
+
+      // Reload goal after observation to pick up any updates
+      const reloaded = this.deps.stateManager.loadGoal(goalId);
+      if (reloaded) {
+        goal = reloaded;
       }
     } catch (err) {
       // Observation failure is non-fatal — continue with current goal state
@@ -850,6 +883,7 @@ export class CoreLoop {
       // generating a persisted preview task that would become an orphan if no gap
       // is found. Duplicate detectDeficiency calls are also avoided this way.
 
+      console.log(`[DEBUG] About to run task cycle with adapter: ${adapter.adapterType}`);
       const taskResult = await this.deps.taskLifecycle.runTaskCycle(
         goalId,
         gapVector,
@@ -857,6 +891,7 @@ export class CoreLoop {
         adapter,
         knowledgeContext
       );
+      console.log(`[DEBUG] Task cycle result: action=${taskResult.action}, task_id=${taskResult.task.id}`);
       result.taskResult = taskResult;
 
       // Portfolio: record task completion for the strategy that generated this task

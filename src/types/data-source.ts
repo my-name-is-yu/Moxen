@@ -2,7 +2,7 @@ import { z } from "zod";
 
 // --- DataSourceType ---
 
-export const DataSourceTypeEnum = z.enum(["file", "http_api", "database", "custom"]);
+export const DataSourceTypeEnum = z.enum(["file", "http_api", "database", "custom", "github_issue"]);
 export type DataSourceType = z.infer<typeof DataSourceTypeEnum>;
 
 // --- PollingConfig ---

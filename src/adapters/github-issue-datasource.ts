@@ -178,6 +178,10 @@ export class GitHubIssueDataSourceAdapter implements IDataSourceAdapter {
     });
   }
 
+  getSupportedDimensions(): string[] {
+    return ["open_issue_count", "closed_issue_count", "total_issue_count", "completion_ratio"];
+  }
+
   async disconnect(): Promise<void> {
     // no-op
   }

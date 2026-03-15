@@ -792,10 +792,13 @@ export class TaskLifecycle {
     }
 
     // 4. Execute task
+    console.log(`[DEBUG-TL] Executing task ${task.id} via adapter ${adapter.adapterType}`);
     const executionResult = await this.executeTask(task, adapter);
+    console.log(`[DEBUG-TL] Execution result: success=${executionResult.success}, stopped=${executionResult.stopped_reason}, error=${executionResult.error}, output=${executionResult.output?.substring(0, 200)}`);
 
     // 5. Verify task
     const verificationResult = await this.verifyTask(task, executionResult);
+    console.log(`[DEBUG-TL] Verification: verdict=${verificationResult.verdict}, evidence=${verificationResult.evidence.map(e => e.description).join('; ').substring(0, 300)}`);
 
     // 6. Handle verdict
     const verdictResult = await this.handleVerdict(task, verificationResult);

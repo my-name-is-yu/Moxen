@@ -367,6 +367,12 @@ export class ObservationEngine {
       extractedValue = 0;
     }
 
+    if (extractedValue === null || extractedValue === undefined) {
+      throw new Error(
+        `Data source "${sourceId}" returned null for dimension "${dimensionName}"`
+      );
+    }
+
     const entry = ObservationLogEntrySchema.parse({
       observation_id: crypto.randomUUID(),
       timestamp: result.timestamp,
@@ -397,6 +403,20 @@ export class ObservationEngine {
    */
   getDataSources(): IDataSourceAdapter[] {
     return this.dataSources;
+  }
+
+  /**
+   * Return dimension info for all registered data sources that expose
+   * getSupportedDimensions().
+   */
+  getAvailableDimensionInfo(): Array<{ name: string; dimensions: string[] }> {
+    const result: Array<{ name: string; dimensions: string[] }> = [];
+    for (const ds of this.dataSources) {
+      if (typeof ds.getSupportedDimensions === "function") {
+        result.push({ name: ds.config.name, dimensions: ds.getSupportedDimensions() });
+      }
+    }
+    return result;
   }
 
   // ─── Knowledge Gap Detection ───

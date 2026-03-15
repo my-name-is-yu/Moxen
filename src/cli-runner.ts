@@ -18,6 +18,9 @@ import * as readline from "node:readline";
 import { parseArgs } from "node:util";
 
 import { StateManager } from "./state-manager.js";
+import type { IDataSourceAdapter } from "./data-source-adapter.js";
+import { FileDataSourceAdapter, HttpApiDataSourceAdapter } from "./data-source-adapter.js";
+import { GitHubIssueDataSourceAdapter } from "./adapters/github-issue-datasource.js";
 import type { ILLMClient } from "./llm-client.js";
 import { buildLLMClient, buildAdapterRegistry } from "./provider-factory.js";
 import { loadProviderConfig, saveProviderConfig } from "./provider-config.js";
@@ -96,7 +99,27 @@ export class CLIRunner {
     const llmClient = buildLLMClient();
     const trustManager = new TrustManager(stateManager);
     const driveSystem = new DriveSystem(stateManager);
-    const observationEngine = new ObservationEngine(stateManager);
+
+    // Read datasource configs from ~/.motiva/datasources/
+    const dsDir = path.join(os.homedir(), '.motiva', 'datasources');
+    const dataSources: IDataSourceAdapter[] = [];
+    try {
+      if (fs.existsSync(dsDir)) {
+        const files = fs.readdirSync(dsDir).filter(f => f.endsWith('.json'));
+        for (const file of files) {
+          const config = JSON.parse(fs.readFileSync(path.join(dsDir, file), 'utf-8'));
+          if (config.type === 'file') {
+            dataSources.push(new FileDataSourceAdapter(config));
+          } else if (config.type === 'http_api') {
+            dataSources.push(new HttpApiDataSourceAdapter(config));
+          } else if (config.type === 'github_issue' || config.type === 'custom' || config.type === 'database') {
+            dataSources.push(new GitHubIssueDataSourceAdapter(config));
+          }
+        }
+      }
+    } catch { /* ignore errors */ }
+
+    const observationEngine = new ObservationEngine(stateManager, dataSources);
     const stallDetector = new StallDetector(stateManager, characterConfig);
     const satisficingJudge = new SatisficingJudge(stateManager);
     const ethicsGate = new EthicsGate(stateManager, llmClient);
@@ -160,7 +183,8 @@ export class CLIRunner {
       llmClient,
       ethicsGate,
       observationEngine,
-      characterConfig
+      characterConfig,
+      satisficingJudge
     );
 
     return { coreLoop, goalNegotiator, reportingEngine, stateManager, driveSystem };
@@ -579,8 +603,8 @@ export class CLIRunner {
       return 1;
     }
 
-    if (type !== "file" && type !== "http_api") {
-      console.error(`Error: unsupported type "${type}". Supported: file, http_api`);
+    if (type !== "file" && type !== "http_api" && type !== "github_issue") {
+      console.error(`Error: unsupported type "${type}". Supported: file, http_api, github_issue`);
       return 1;
     }
 
@@ -609,6 +633,8 @@ export class CLIRunner {
         return 1;
       }
       connection["path"] = values.path;
+    } else if (type === "github_issue") {
+      // No connection params needed — uses `gh` CLI
     } else {
       if (!values.url) {
         console.error("Error: --url is required for http_api data source");

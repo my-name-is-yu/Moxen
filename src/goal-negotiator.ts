@@ -45,10 +45,19 @@ export class EthicsRejectedError extends Error {
 
 // ─── Prompts ───
 
-function buildDecompositionPrompt(description: string, constraints: string[]): string {
+function buildDecompositionPrompt(
+  description: string,
+  constraints: string[],
+  availableDataSources?: Array<{ name: string; dimensions: string[] }>
+): string {
   const constraintsSection =
     constraints.length > 0
       ? `\nConstraints:\n${constraints.map((c) => `- ${c}`).join("\n")}`
+      : "";
+
+  const dataSourcesSection =
+    availableDataSources && availableDataSources.length > 0
+      ? `\nAvailable Data Sources:\nYou MUST use the exact dimension names listed below. These are the only dimensions that can be automatically observed.\nDo NOT invent alternative names — use these exact strings as dimension names.\nIf you need dimensions not listed here, you may add them, but prefer the ones below.\n\n${availableDataSources.map((ds) => `- "${ds.name}" provides: ${ds.dimensions.join(", ")}`).join("\n")}`
       : "";
 
   return `Decompose the following goal into measurable dimensions.
@@ -72,7 +81,7 @@ Return a JSON array of dimension objects. Example:
     "observation_method_hint": "Run test suite and check coverage report"
   }
 ]
-
+${dataSourcesSection}
 Return ONLY a JSON array, no other text.`;
 }
 
@@ -326,7 +335,8 @@ export class GoalNegotiator {
     // (parsed from options above)
 
     // Step 2: Dimension Decomposition (LLM)
-    const decompositionPrompt = buildDecompositionPrompt(rawGoalDescription, constraints);
+    const availableDataSources = this.observationEngine.getAvailableDimensionInfo();
+    const decompositionPrompt = buildDecompositionPrompt(rawGoalDescription, constraints, availableDataSources);
     const decompositionResponse = await this.llmClient.sendMessage(
       [{ role: "user", content: decompositionPrompt }],
       { temperature: 0 }
@@ -336,6 +346,20 @@ export class GoalNegotiator {
       decompositionResponse.content,
       z.array(DimensionDecompositionSchema)
     );
+
+    // Post-process: map dimension names to DataSource dimensions when similar
+    if (availableDataSources.length > 0) {
+      const allDsNames = availableDataSources.flatMap(ds => ds.dimensions);
+      for (const dim of dimensions) {
+        if (!allDsNames.includes(dim.name)) {
+          // Try to find a similar DataSource dimension
+          const match = findBestDimensionMatch(dim.name, allDsNames);
+          if (match) {
+            dim.name = match;
+          }
+        }
+      }
+    }
 
     log.step2_decomposition = {
       dimensions,
@@ -630,9 +654,11 @@ export class GoalNegotiator {
       ethicsVerdict.verdict === "flag" ? ethicsVerdict.risks : undefined;
 
     // Step 2: Re-decompose dimensions (LLM) using existing goal + context
+    const availableDataSources = this.observationEngine.getAvailableDimensionInfo();
     const redecompPrompt = buildDecompositionPrompt(
       `${existingGoal.description}${context ? ` (Renegotiation context: ${context})` : ""}`,
-      existingGoal.constraints
+      existingGoal.constraints,
+      availableDataSources
     );
     const decompositionResponse = await this.llmClient.sendMessage(
       [{ role: "user", content: redecompPrompt }],
@@ -643,6 +669,20 @@ export class GoalNegotiator {
       decompositionResponse.content,
       z.array(DimensionDecompositionSchema)
     );
+
+    // Post-process: map dimension names to DataSource dimensions when similar
+    if (availableDataSources.length > 0) {
+      const allDsNames = availableDataSources.flatMap(ds => ds.dimensions);
+      for (const dim of dimensions) {
+        if (!allDsNames.includes(dim.name)) {
+          // Try to find a similar DataSource dimension
+          const match = findBestDimensionMatch(dim.name, allDsNames);
+          if (match) {
+            dim.name = match;
+          }
+        }
+      }
+    }
 
     log.step2_decomposition = { dimensions, method: "llm" };
 
@@ -1004,4 +1044,27 @@ export class GoalNegotiator {
   ): number {
     return baseline + changeRate * timeHorizonDays * REALISTIC_TARGET_ACCELERATION_FACTOR;
   }
+}
+
+/**
+ * Find the best matching DataSource dimension name for a given dimension name.
+ * Uses simple keyword overlap matching.
+ */
+function findBestDimensionMatch(name: string, candidates: string[]): string | null {
+  const nameTokens = name.toLowerCase().split(/[_\s-]+/);
+  let bestMatch: string | null = null;
+  let bestScore = 0;
+
+  for (const candidate of candidates) {
+    const candidateTokens = candidate.toLowerCase().split(/[_\s-]+/);
+    // Count overlapping tokens
+    const overlap = nameTokens.filter(t => candidateTokens.includes(t)).length;
+    const score = overlap / Math.max(nameTokens.length, candidateTokens.length);
+    if (score > bestScore && score >= 0.3) {  // At least 30% token overlap
+      bestScore = score;
+      bestMatch = candidate;
+    }
+  }
+
+  return bestMatch;
 }
