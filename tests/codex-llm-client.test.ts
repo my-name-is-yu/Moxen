@@ -40,6 +40,7 @@ class FakeChildProcess extends EventEmitter {
   readonly stdout = new EventEmitter();
   readonly stderr = new EventEmitter();
   readonly stdin = {
+    write: vi.fn(),
     end: vi.fn(),
     on: vi.fn(),
   };
@@ -97,7 +98,7 @@ describe("CodexLLMClient", () => {
   // ─── spawn arguments ───
 
   describe("sendMessage: spawn args", () => {
-    it("spawns with exec --ephemeral --full-auto -o <path> PROMPT", async () => {
+    it("spawns with exec --ephemeral --full-auto -o <path> - (stdin mode)", async () => {
       const client = new CodexLLMClient();
       const child = makeFakeChild();
 
@@ -113,6 +114,8 @@ describe("CodexLLMClient", () => {
       // -o must be followed by a path
       const dashOIdx = spawnArgs.indexOf("-o");
       expect(spawnArgs[dashOIdx + 1]).toBeTruthy();
+      // Last arg is "-" (read prompt from stdin)
+      expect(spawnArgs[spawnArgs.length - 1]).toBe("-");
     });
 
     it("includes --model flag when model is configured", async () => {
@@ -161,8 +164,8 @@ describe("CodexLLMClient", () => {
 
   // ─── Prompt building ───
 
-  describe("sendMessage: prompt building", () => {
-    it("builds prompt from user messages", async () => {
+  describe("sendMessage: prompt building (via stdin)", () => {
+    it("writes prompt to stdin from user messages", async () => {
       const client = new CodexLLMClient();
       const child = makeFakeChild();
 
@@ -172,12 +175,12 @@ describe("CodexLLMClient", () => {
       child.emit("close", 0);
       await promise;
 
-      const [, spawnArgs] = mockSpawn.mock.calls[0] as [string, string[]];
-      const prompt = spawnArgs[spawnArgs.length - 1]!;
+      const prompt = child.stdin.write.mock.calls[0]?.[0] as string;
       expect(prompt).toContain("user: hello world");
+      expect(child.stdin.end).toHaveBeenCalled();
     });
 
-    it("prepends system instruction to prompt", async () => {
+    it("prepends system instruction to prompt written to stdin", async () => {
       const client = new CodexLLMClient();
       const child = makeFakeChild();
 
@@ -188,15 +191,14 @@ describe("CodexLLMClient", () => {
       child.emit("close", 0);
       await promise;
 
-      const [, spawnArgs] = mockSpawn.mock.calls[0] as [string, string[]];
-      const prompt = spawnArgs[spawnArgs.length - 1]!;
+      const prompt = child.stdin.write.mock.calls[0]?.[0] as string;
       expect(prompt).toContain("System instruction: You are a helpful assistant.");
       expect(prompt).toContain("user: question");
       // System should appear before user message
       expect(prompt.indexOf("System instruction")).toBeLessThan(prompt.indexOf("user:"));
     });
 
-    it("concatenates multiple messages in order", async () => {
+    it("concatenates multiple messages in order via stdin", async () => {
       const client = new CodexLLMClient();
       const child = makeFakeChild();
 
@@ -208,8 +210,7 @@ describe("CodexLLMClient", () => {
       child.emit("close", 0);
       await promise;
 
-      const [, spawnArgs] = mockSpawn.mock.calls[0] as [string, string[]];
-      const prompt = spawnArgs[spawnArgs.length - 1]!;
+      const prompt = child.stdin.write.mock.calls[0]?.[0] as string;
       expect(prompt).toContain("user: first");
       expect(prompt).toContain("assistant: reply");
       expect(prompt).toContain("user: second");

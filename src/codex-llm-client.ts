@@ -129,14 +129,15 @@ export class CodexLLMClient implements ILLMClient {
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "motiva-codex-"));
       const tmpFile = path.join(tmpDir, "response.txt");
 
-      // Build spawn args: exec --ephemeral --full-auto -o <tmpfile> [--model <model>] "PROMPT"
+      // Build spawn args: exec --ephemeral --full-auto -o <tmpfile> [--model <model>] -
+      // Prompt is sent via stdin (using "-" as positional arg) to avoid arg length limits.
       const spawnArgs: string[] = ["exec", "--ephemeral", "--full-auto", "-o", tmpFile];
 
       if (model) {
         spawnArgs.push("--model", model);
       }
 
-      spawnArgs.push(prompt);
+      spawnArgs.push("-");
 
       const child = spawn(this.cliPath, spawnArgs, {
         stdio: ["pipe", "pipe", "pipe"],
@@ -144,6 +145,8 @@ export class CodexLLMClient implements ILLMClient {
       });
 
       let timedOut = false;
+      let stderrData = "";
+      child.stderr.on("data", (chunk: Buffer) => { stderrData += chunk.toString(); });
 
       // Timeout: send SIGTERM, then SIGKILL after 5s
       const timeoutHandle = setTimeout(() => {
@@ -163,7 +166,8 @@ export class CodexLLMClient implements ILLMClient {
         if (err.code !== "EPIPE") throw err;
       });
 
-      // Close stdin immediately — prompt is a positional arg
+      // Write prompt via stdin and close
+      child.stdin.write(prompt);
       child.stdin.end();
 
       child.on("error", (err: Error) => {
@@ -187,9 +191,10 @@ export class CodexLLMClient implements ILLMClient {
 
         if (code !== 0) {
           _cleanupTmp(tmpDir, tmpFile);
+          const detail = stderrData.trim() ? ` — ${stderrData.trim().slice(0, 500)}` : "";
           reject(
             new Error(
-              `CodexLLMClient: process exited with code ${code}`
+              `CodexLLMClient: process exited with code ${code}${detail}`
             )
           );
           return;
