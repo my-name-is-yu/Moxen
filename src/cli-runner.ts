@@ -15,6 +15,8 @@
 //   motiva stop                       Stop the running daemon
 //   motiva cron --goal <id>           Print crontab entry for a goal
 //   motiva cleanup                    Archive all completed goals and remove stale data
+//   motiva improve [path]             Analyze, suggest goals, and run improvement loop
+//   motiva suggest "<context>"        Suggest improvement goals for a project
 //   motiva capability list            List all registered capabilities
 //   motiva capability remove <name>   Remove a capability by name
 
@@ -1484,6 +1486,322 @@ Options:
     return 1;
   }
 
+  // ─── Improve Subcommand ───
+
+  private async gatherProjectContext(targetPath: string): Promise<string> {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execFileAsync = promisify(execFile);
+
+    const parts: string[] = [];
+
+    // 1. List project files (ts/js only, exclude node_modules/dist)
+    try {
+      const { stdout } = await execFileAsync("find", [
+        targetPath, "-type", "f",
+        "(", "-name", "*.ts", "-o", "-name", "*.js", ")",
+        "-not", "-path", "*/node_modules/*",
+        "-not", "-path", "*/dist/*",
+        "-not", "-path", "*/.git/*",
+      ], { timeout: 10000 });
+      if (stdout.trim().length > 0) {
+        parts.push(`Project files:\n${stdout.trim()}`);
+      }
+    } catch { /* ignore */ }
+
+    // 2. Read package.json if exists
+    try {
+      const { readFile } = await import("node:fs/promises");
+      const pkgPath = targetPath === "." ? "package.json" : `${targetPath}/package.json`;
+      const pkg = await readFile(pkgPath, "utf-8");
+      parts.push(`package.json:\n${pkg}`);
+    } catch { /* ignore */ }
+
+    // 3. Count TODOs/FIXMEs
+    try {
+      const { stdout } = await execFileAsync("grep", [
+        "-rc", "TODO\\|FIXME", targetPath,
+        "--include=*.ts", "--include=*.js",
+      ], { timeout: 10000 });
+      const totalCount = stdout.trim().split("\n")
+        .reduce((sum, line) => sum + parseInt(line.split(":").pop() || "0", 10), 0);
+      parts.push(`TODO/FIXME count: ${totalCount}`);
+    } catch (err: unknown) {
+      // grep returns exit 1 for zero matches
+      if (typeof err === "object" && err !== null && "code" in err && (err as { code: number }).code === 1) {
+        parts.push("TODO/FIXME count: 0");
+      }
+    }
+
+    // 4. Check test count
+    try {
+      const { stdout } = await execFileAsync("find", [
+        targetPath, "-name", "*.test.ts", "-not", "-path", "*/node_modules/*",
+      ], { timeout: 10000 });
+      const testFiles = stdout.trim().split("\n").filter(Boolean);
+      parts.push(`Test files: ${testFiles.length}`);
+    } catch { /* ignore */ }
+
+    return parts.join("\n\n");
+  }
+
+  private async cmdImprove(args: string[]): Promise<number> {
+    let values: { auto?: boolean; max?: string; yes?: boolean };
+    let positionals: string[];
+    try {
+      ({ values, positionals } = parseArgs({
+        args,
+        options: {
+          auto: { type: "boolean", default: false },
+          max: { type: "string", short: "n", default: "3" },
+          yes: { type: "boolean", default: false },
+        },
+        allowPositionals: true,
+        strict: false,
+      }) as { values: { auto?: boolean; max?: string; yes?: boolean }; positionals: string[] });
+    } catch (err) {
+      console.error(formatOperationError("parse improve command arguments", err));
+      return 1;
+    }
+
+    const targetPath = positionals[0] || ".";
+    console.log(`\n[Motiva Improve] Analyzing ${targetPath}...\n`);
+
+    const apiKey = this.getApiKey();
+    const providerConfig = loadProviderConfig();
+    const provider = providerConfig.llm_provider;
+    if (!apiKey && provider !== "ollama" && provider !== "openai" && provider !== "codex") {
+      console.error(
+        "Error: ANTHROPIC_API_KEY environment variable is not set.\n" +
+          "Set it with: export ANTHROPIC_API_KEY=<your-key>\n" +
+          "Or use OpenAI: export MOTIVA_LLM_PROVIDER=openai\n" +
+          "Or use Ollama: export MOTIVA_LLM_PROVIDER=ollama\n" +
+          "Or use Codex: export MOTIVA_LLM_PROVIDER=codex"
+      );
+      return 1;
+    }
+
+    let deps: ReturnType<typeof this.buildDeps>;
+    try {
+      deps = this.buildDeps(apiKey);
+    } catch (err) {
+      console.error(formatOperationError("initialise improve dependencies", err));
+      return 1;
+    }
+
+    // Step 1: Gather context from the target path
+    const context = await this.gatherProjectContext(targetPath);
+
+    // Step 2: Suggest goals
+    const existingGoalIds = deps.stateManager.listGoalIds();
+    const existingTitles: string[] = [];
+    for (const id of existingGoalIds) {
+      const goal = deps.stateManager.loadGoal(id);
+      if (goal?.title) {
+        existingTitles.push(goal.title);
+      }
+    }
+
+    let suggestions;
+    try {
+      suggestions = await deps.goalNegotiator.suggestGoals(context, {
+        maxSuggestions: parseInt(values.max || "3", 10),
+        existingGoals: existingTitles,
+        repoPath: targetPath,
+      });
+    } catch (err) {
+      console.error(formatOperationError("generate improvement suggestions", err));
+      return 1;
+    }
+
+    if (suggestions.length === 0) {
+      console.log("No improvement goals found for the given path.");
+      return 0;
+    }
+
+    // Step 3: Select goal(s)
+    let selectedIndex = 0;
+    if (values.auto) {
+      // Auto mode: pick the first suggestion (highest priority)
+      console.log(`[Auto] Selected: ${suggestions[0]!.title}`);
+    } else {
+      // Display suggestions and let user pick (or use first in --yes mode)
+      console.log("=== Suggested Improvements ===\n");
+      for (let i = 0; i < suggestions.length; i++) {
+        const s = suggestions[i];
+        if (!s) continue;
+        console.log(`${i + 1}. ${s.title}`);
+        console.log(`   ${s.rationale}\n`);
+      }
+      if (values.yes) {
+        selectedIndex = 0;
+        console.log(`[--yes] Auto-selecting: ${suggestions[0]!.title}\n`);
+      } else {
+        // In non-interactive mode, just select the first
+        selectedIndex = 0;
+        console.log(`Selected: ${suggestions[0]!.title}\n`);
+      }
+    }
+
+    const selected = suggestions[selectedIndex];
+    if (!selected) {
+      console.error("Error: no suggestion available at index 0.");
+      return 1;
+    }
+
+    // Step 4: Negotiate the selected goal
+    console.log(`[Motiva Improve] Negotiating goal: "${selected.title}"...`);
+    let goal: Awaited<ReturnType<typeof deps.goalNegotiator.negotiate>>["goal"];
+    let response: Awaited<ReturnType<typeof deps.goalNegotiator.negotiate>>["response"];
+    try {
+      ({ goal, response } = await deps.goalNegotiator.negotiate(selected.description, {
+        constraints: [],
+      }));
+    } catch (err) {
+      console.error(formatOperationError(`negotiate goal "${selected.title}"`, err));
+      return 1;
+    }
+
+    if (response.type === "reject") {
+      console.log(`Goal rejected: ${response.message}`);
+      return 1;
+    }
+
+    console.log(`[Motiva Improve] Goal registered: ${goal.id}`);
+    console.log(`  Response: ${response.type} — ${response.message}\n`);
+
+    // Step 5: Run the loop (if --auto or --yes)
+    if (values.auto || values.yes) {
+      console.log(`[Motiva Improve] Starting improvement loop for goal ${goal.id}...`);
+      try {
+        await deps.coreLoop.run(goal.id);
+      } catch (err) {
+        console.error(formatOperationError(`run improvement loop for goal "${goal.id}"`, err));
+        return 1;
+      }
+      console.log(`[Motiva Improve] Loop completed for goal ${goal.id}`);
+    } else {
+      console.log(`Goal created. Run with: motiva run --goal ${goal.id}`);
+    }
+
+    return 0;
+  }
+
+  // ─── Suggest Subcommand ───
+
+  private async cmdSuggest(args: string[]): Promise<number> {
+    let values: { max?: string; path?: string };
+    let positionals: string[];
+    try {
+      ({ values, positionals } = parseArgs({
+        args,
+        options: {
+          max: { type: "string", short: "n", default: "5" },
+          path: { type: "string", short: "p" },
+        },
+        allowPositionals: true,
+        strict: false,
+      }) as { values: { max?: string; path?: string }; positionals: string[] });
+    } catch (err) {
+      console.error(formatOperationError("parse suggest command arguments", err));
+      return 1;
+    }
+
+    const context = positionals[0];
+    if (!context) {
+      console.error('Usage: motiva suggest "<context>" [--max N] [--path <dir>]');
+      return 1;
+    }
+
+    const apiKey = this.getApiKey();
+    const providerConfig = loadProviderConfig();
+    const provider = providerConfig.llm_provider;
+    if (!apiKey && provider !== "ollama" && provider !== "openai" && provider !== "codex") {
+      console.error(
+        "Error: ANTHROPIC_API_KEY environment variable is not set.\n" +
+          "Set it with: export ANTHROPIC_API_KEY=<your-key>\n" +
+          "Or use OpenAI: export MOTIVA_LLM_PROVIDER=openai\n" +
+          "Or use Ollama: export MOTIVA_LLM_PROVIDER=ollama\n" +
+          "Or use Codex: export MOTIVA_LLM_PROVIDER=codex"
+      );
+      return 1;
+    }
+
+    let deps: ReturnType<typeof this.buildDeps>;
+    try {
+      deps = this.buildDeps(apiKey);
+    } catch (err) {
+      console.error(formatOperationError("initialise suggest dependencies", err));
+      return 1;
+    }
+
+    // Load existing goals for dedup
+    const existingGoalIds = deps.stateManager.listGoalIds();
+    const existingTitles: string[] = [];
+    for (const id of existingGoalIds) {
+      const goal = deps.stateManager.loadGoal(id);
+      if (goal?.title) {
+        existingTitles.push(goal.title);
+      }
+    }
+
+    // If --path provided, list TypeScript files as additional context
+    let fullContext = context;
+    if (values.path) {
+      const { execFile } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const execFileAsync = promisify(execFile);
+      try {
+        const { stdout } = await execFileAsync(
+          "find",
+          [values.path, "-name", "*.ts", "-not", "-path", "*/node_modules/*", "-not", "-path", "*/dist/*"],
+          { timeout: 10000 }
+        );
+        if (stdout.trim().length > 0) {
+          fullContext += `\n\nProject files:\n${stdout}`;
+        }
+      } catch {
+        // ignore — proceed with context as-is
+      }
+    }
+
+    console.log("Generating goal suggestions...\n");
+
+    const capabilityDetectorLlmClient = buildLLMClient();
+    const capabilityReportingEngine = new ReportingEngine(this.stateManager);
+    const capabilityDetector = new CapabilityDetector(this.stateManager, capabilityDetectorLlmClient, capabilityReportingEngine);
+
+    let suggestions;
+    try {
+      suggestions = await deps.goalNegotiator.suggestGoals(fullContext, {
+        maxSuggestions: parseInt(values.max ?? "5", 10),
+        existingGoals: existingTitles,
+        repoPath: values.path,
+        capabilityDetector,
+      });
+    } catch (err) {
+      console.error(formatOperationError("generate goal suggestions", err));
+      return 1;
+    }
+
+    if (suggestions.length === 0) {
+      console.log("No improvement goals suggested for the given context.");
+      return 0;
+    }
+
+    console.log(`=== Suggested Goals (${suggestions.length}) ===\n`);
+    for (let i = 0; i < suggestions.length; i++) {
+      const s = suggestions[i];
+      if (!s) continue;
+      console.log(`${i + 1}. ${s.title}`);
+      console.log(`   ${s.rationale}`);
+      console.log(`   Dimensions: ${s.dimensions_hint.join(", ")}`);
+      console.log(`   -> motiva goal add "${s.description}"\n`);
+    }
+
+    return 0;
+  }
+
   // ─── Main dispatch ───
 
   /**
@@ -1828,6 +2146,15 @@ Options:
       return 1;
     }
 
+    if (subcommand === "suggest") {
+      return await this.cmdSuggest(argv.slice(1));
+    }
+
+    if (subcommand === "improve") {
+      const improveArgs = globalYes ? [...argv.slice(1), "--yes"] : argv.slice(1);
+      return await this.cmdImprove(improveArgs);
+    }
+
     if (subcommand === "tui") {
       // Dynamically import to avoid bundling Ink into the CLI when not needed
       const { startTUI } = await import("./tui/entry.js");
@@ -1862,6 +2189,8 @@ Motiva — AI agent orchestrator
 
 Usage:
   motiva run --goal <id>              Run CoreLoop for a goal
+  motiva improve [path]               Analyze path, suggest goals, and optionally run improvement loop
+  motiva suggest "<context>"          Suggest improvement goals for a project context
   motiva goal add "<description>"     Register a new goal (interactive)
   motiva goal list                    List all registered goals
   motiva goal list --archived         Also list archived goals
@@ -1892,6 +2221,15 @@ Options (motiva run):
   --adapter <type>                    Adapter: claude_api | claude_code_cli | github_issue (default: claude_api)
   --tree                              Enable tree mode (iterate across all tree nodes)
   --yes, -y                           Auto-approve all tasks (skip approval prompts)
+
+Options (motiva improve):
+  --auto                              Full auto mode (select best suggestion, run loop)
+  --yes                               Auto-approve (select first suggestion, run loop)
+  --max, -n <n>                       Max suggestions (default: 3)
+
+Options (motiva suggest):
+  --max, -n <n>                       Max number of suggestions (default: 5)
+  --path, -p <dir>                    Repo path to scan for additional context
 
 Options (motiva goal add):
   --deadline <ISO-date>               Optional deadline (e.g. 2026-06-01)

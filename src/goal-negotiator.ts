@@ -27,6 +27,7 @@ import type {
   GoalDecompositionConfig,
   DecompositionResult,
 } from "./types/goal-tree.js";
+import type { CapabilityDetector } from "./capability-detector.js";
 
 // ─── Constants ───
 
@@ -175,6 +176,40 @@ ${instruction}
 Return a brief, user-facing message (1-3 sentences). Return ONLY the message text, no JSON.`;
 }
 
+function buildSuggestGoalsPrompt(
+  context: string,
+  maxSuggestions: number,
+  existingGoals: string[]
+): string {
+  const existingGoalsSection =
+    existingGoals.length > 0
+      ? `\nExisting goals (do NOT suggest duplicates):\n${existingGoals.map((g) => `- ${g}`).join("\n")}`
+      : "";
+
+  return `You are a goal advisor for a software project. Given the project context below, suggest concrete, measurable improvement goals.
+
+Each goal should:
+1. Be specific and achievable (not vague like "improve code quality")
+2. Have clear success criteria that can be measured
+3. Include 2-4 dimension hints (what to measure)
+4. Be independent of other suggestions
+
+Context:
+${context}${existingGoalsSection}
+
+Return a JSON array of up to ${maxSuggestions} suggestions:
+[
+  {
+    "title": "Short descriptive title",
+    "description": "Detailed description suitable for goal negotiation",
+    "rationale": "Why this goal matters",
+    "dimensions_hint": ["dimension_name_1", "dimension_name_2"]
+  }
+]
+
+Return ONLY a JSON array, no other text.`;
+}
+
 function buildCapabilityCheckPrompt(
   goalDescription: string,
   dimensions: DimensionDecomposition[],
@@ -253,6 +288,19 @@ Return a JSON array of subgoal objects:
 
 Return ONLY a JSON array, no other text.`;
 }
+
+// ─── Goal Suggestion schemas ───
+
+const GoalSuggestionSchema = z.object({
+  title: z.string(),
+  description: z.string(),
+  rationale: z.string(),
+  dimensions_hint: z.array(z.string()),
+});
+
+const GoalSuggestionListSchema = z.array(GoalSuggestionSchema);
+
+export type GoalSuggestion = z.infer<typeof GoalSuggestionSchema>;
 
 // ─── Capability check schema for LLM parsing ───
 
@@ -1064,6 +1112,116 @@ export class GoalNegotiator {
     };
 
     return this.goalTreeManager.decomposeGoal(goalId, resolvedConfig);
+  }
+
+  // ─── suggestGoals() ───
+
+  /**
+   * Suggest measurable improvement goals based on the given context.
+   * Does NOT save goals — it only suggests. Use negotiate() to register a suggestion.
+   */
+  async suggestGoals(
+    context: string,
+    options?: {
+      maxSuggestions?: number;
+      existingGoals?: string[];
+      repoPath?: string;
+      capabilityDetector?: CapabilityDetector;
+    }
+  ): Promise<GoalSuggestion[]> {
+    const maxSuggestions = options?.maxSuggestions ?? 5;
+    const existingGoals = options?.existingGoals ?? [];
+
+    if (!context || context.trim().length === 0) {
+      return [];
+    }
+
+    const prompt = buildSuggestGoalsPrompt(context, maxSuggestions, existingGoals);
+
+    let rawContent: string;
+    try {
+      const response = await this.llmClient.sendMessage(
+        [{ role: "user", content: prompt }],
+        { temperature: 0.3 }
+      );
+      rawContent = response.content;
+    } catch {
+      return [];
+    }
+
+    let suggestions: GoalSuggestion[];
+    try {
+      suggestions = this.llmClient.parseJSON(rawContent, GoalSuggestionListSchema);
+    } catch {
+      return [];
+    }
+
+    // Apply ethics filtering — remove rejected suggestions
+    const ethicsFiltered: GoalSuggestion[] = [];
+    for (const suggestion of suggestions) {
+      try {
+        const verdict = await this.ethicsGate.check(
+          "goal",
+          randomUUID(),
+          suggestion.description
+        );
+        if (verdict.verdict === "reject") {
+          continue;
+        }
+        ethicsFiltered.push(suggestion);
+      } catch {
+        // Non-critical: if ethics check fails, include the suggestion
+        ethicsFiltered.push(suggestion);
+      }
+    }
+
+    return await this.filterSuggestions(
+      ethicsFiltered,
+      options?.existingGoals || [],
+      options?.capabilityDetector,
+    );
+  }
+
+  private async filterSuggestions(
+    suggestions: GoalSuggestion[],
+    existingGoals: string[],
+    capabilityDetector?: CapabilityDetector,
+  ): Promise<GoalSuggestion[]> {
+    const filtered: GoalSuggestion[] = [];
+
+    for (const suggestion of suggestions) {
+      // 1. Dedup: skip if similar to existing goal (case-insensitive substring match)
+      const isDuplicate = existingGoals.some(existing => {
+        const existingLower = existing.toLowerCase();
+        const titleLower = suggestion.title.toLowerCase();
+        return existingLower.includes(titleLower) || titleLower.includes(existingLower);
+      });
+      if (isDuplicate) {
+        console.log(`[GoalNegotiator] Filtered duplicate suggestion: "${suggestion.title}"`);
+        continue;
+      }
+
+      // 2. Feasibility check via CapabilityDetector (if available)
+      if (capabilityDetector) {
+        try {
+          const gap = await capabilityDetector.detectGoalCapabilityGap(
+            suggestion.description,
+            this.adapterCapabilities?.map(a => a.capabilities).flat() || []
+          );
+          if (gap && !gap.acquirable) {
+            console.log(`[GoalNegotiator] Filtered infeasible suggestion: "${suggestion.title}" — ${gap.gap.reason}`);
+            continue;
+          }
+        } catch (err) {
+          // Non-blocking: if capability check fails, keep the suggestion
+          console.warn(`[GoalNegotiator] Capability check failed for "${suggestion.title}": ${err}`);
+        }
+      }
+
+      filtered.push(suggestion);
+    }
+
+    return filtered;
   }
 
   // ─── getNegotiationLog() ───

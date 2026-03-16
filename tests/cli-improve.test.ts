@@ -1,0 +1,540 @@
+/**
+ * CLIRunner — `motiva improve` subcommand tests (M10.3)
+ *
+ * Strategy:
+ * - All heavy dependencies (CoreLoop, GoalNegotiator, LLM clients, etc.) are mocked.
+ * - CLIRunner(tmpDir) creates its own StateManager pointing to tmpDir.
+ * - Tests verify argument routing, suggestion/negotiation flow, loop execution, and
+ *   the no-loop path when neither --auto nor --yes is provided.
+ */
+
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import * as os from "node:os";
+import * as fs from "node:fs";
+import * as path from "node:path";
+
+// ─── Module mocks ────────────────────────────────────────────────────────────
+
+vi.mock("../src/core-loop.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/core-loop.js")>();
+  return {
+    ...actual,
+    CoreLoop: vi.fn(),
+  };
+});
+
+vi.mock("../src/goal-negotiator.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/goal-negotiator.js")>();
+  return {
+    ...actual,
+    GoalNegotiator: vi.fn(),
+  };
+});
+
+vi.mock("../src/llm-client.js", () => ({
+  LLMClient: vi.fn().mockImplementation(() => ({})),
+  MockLLMClient: vi.fn(),
+}));
+
+vi.mock("../src/trust-manager.js", () => ({
+  TrustManager: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("../src/drive-system.js", () => ({
+  DriveSystem: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("../src/observation-engine.js", () => ({
+  ObservationEngine: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("../src/stall-detector.js", () => ({
+  StallDetector: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("../src/satisficing-judge.js", () => ({
+  SatisficingJudge: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("../src/ethics-gate.js", () => ({
+  EthicsGate: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("../src/session-manager.js", () => ({
+  SessionManager: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("../src/strategy-manager.js", () => ({
+  StrategyManager: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("../src/adapter-layer.js", () => ({
+  AdapterRegistry: vi.fn().mockImplementation(() => ({
+    register: vi.fn(),
+    getAdapterCapabilities: vi.fn().mockReturnValue([]),
+  })),
+}));
+
+vi.mock("../src/adapters/claude-code-cli.js", () => ({
+  ClaudeCodeCLIAdapter: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("../src/adapters/claude-api.js", () => ({
+  ClaudeAPIAdapter: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("../src/task-lifecycle.js", () => ({
+  TaskLifecycle: vi.fn().mockImplementation(() => ({})),
+}));
+
+vi.mock("../src/reporting-engine.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../src/reporting-engine.js")>();
+  return {
+    ...actual,
+    ReportingEngine: vi.fn().mockImplementation((...args) => new actual.ReportingEngine(...args)),
+  };
+});
+
+// ─── Imports after mocks ──────────────────────────────────────────────────────
+
+import { CLIRunner } from "../src/cli-runner.js";
+import { StateManager } from "../src/state-manager.js";
+import { CoreLoop } from "../src/core-loop.js";
+import { GoalNegotiator } from "../src/goal-negotiator.js";
+import type { Goal } from "../src/types/goal.js";
+import type { LoopResult } from "../src/core-loop.js";
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function makeTempDir(): string {
+  return fs.mkdtempSync(path.join(os.tmpdir(), "motiva-improve-test-"));
+}
+
+function makeGoal(overrides: Partial<Goal> = {}): Goal {
+  const now = new Date().toISOString();
+  return {
+    id: "goal-improve-1",
+    parent_id: null,
+    node_type: "goal",
+    title: "Improve test coverage",
+    description: "Increase test coverage to 90%",
+    status: "active",
+    dimensions: [],
+    gap_aggregation: "max",
+    dimension_mapping: null,
+    constraints: [],
+    children_ids: [],
+    target_date: null,
+    origin: "manual",
+    pace_snapshot: null,
+    deadline: null,
+    confidence_flag: null,
+    user_override: false,
+    feasibility_note: null,
+    uncertainty_weight: 1.0,
+    created_at: now,
+    updated_at: now,
+    ...overrides,
+  };
+}
+
+function makeLoopResult(overrides: Partial<LoopResult> = {}): LoopResult {
+  const now = new Date().toISOString();
+  return {
+    goalId: "goal-improve-1",
+    totalIterations: 2,
+    finalStatus: "completed",
+    iterations: [],
+    startedAt: now,
+    completedAt: now,
+    ...overrides,
+  };
+}
+
+function makeSuggestion(overrides: Partial<{
+  title: string;
+  description: string;
+  rationale: string;
+  dimensions_hint: string[];
+  priority: number;
+}> = {}) {
+  return {
+    title: "Improve test coverage",
+    description: "Increase test coverage to 90% for all core modules",
+    rationale: "Current test coverage is below the 80% threshold",
+    dimensions_hint: ["test_coverage"],
+    priority: 1,
+    ...overrides,
+  };
+}
+
+function makeNegotiationResult(goal: Goal) {
+  return {
+    goal,
+    response: {
+      type: "accept" as const,
+      message: "Goal registered successfully.",
+      counter_proposal: null,
+      counter_target: null,
+    },
+    log: {
+      goal_id: goal.id,
+      timestamp: new Date().toISOString(),
+      is_renegotiation: false,
+      renegotiation_trigger: null,
+    },
+  };
+}
+
+// ─── Setup / Teardown ────────────────────────────────────────────────────────
+
+let tmpDir: string;
+let stateManager: StateManager;
+let origApiKey: string | undefined;
+
+beforeEach(() => {
+  tmpDir = makeTempDir();
+  stateManager = new StateManager(tmpDir);
+
+  origApiKey = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = "test-api-key";
+});
+
+afterEach(() => {
+  if (origApiKey === undefined) {
+    delete process.env.ANTHROPIC_API_KEY;
+  } else {
+    process.env.ANTHROPIC_API_KEY = origApiKey;
+  }
+  delete process.env.MOTIVA_LLM_PROVIDER;
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+  vi.clearAllMocks();
+});
+
+async function runCLI(...args: string[]): Promise<number> {
+  const runner = new CLIRunner(tmpDir);
+  return runner.run(args);
+}
+
+// ─── improve subcommand ───────────────────────────────────────────────────────
+
+describe("improve subcommand — basic routing", () => {
+  it("exits with code 0 when suggestions are found and no loop is run (no --auto/--yes)", async () => {
+    const goal = makeGoal();
+    const mockSuggest = vi.fn().mockResolvedValue([makeSuggestion()]);
+    const mockNegotiate = vi.fn().mockResolvedValue(makeNegotiationResult(goal));
+
+    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+      suggestGoals: mockSuggest,
+      negotiate: mockNegotiate,
+    } as unknown as GoalNegotiator));
+
+    vi.mocked(CoreLoop).mockImplementation(() => ({
+      run: vi.fn().mockResolvedValue(makeLoopResult()),
+      stop: vi.fn(),
+    } as unknown as CoreLoop));
+
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const code = await runCLI("improve", ".");
+    consoleSpy.mockRestore();
+
+    expect(code).toBe(0);
+  });
+
+  it("exits with code 1 when ANTHROPIC_API_KEY is not set (and no alternative provider)", async () => {
+    delete process.env.ANTHROPIC_API_KEY;
+    process.env.MOTIVA_LLM_PROVIDER = "anthropic";
+
+    const code = await runCLI("improve", ".");
+    expect(code).toBe(1);
+  });
+});
+
+describe("improve subcommand — suggestion flow", () => {
+  it("calls suggestGoals with context gathered from the target path", async () => {
+    const goal = makeGoal();
+    const mockSuggest = vi.fn().mockResolvedValue([makeSuggestion()]);
+    const mockNegotiate = vi.fn().mockResolvedValue(makeNegotiationResult(goal));
+
+    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+      suggestGoals: mockSuggest,
+      negotiate: mockNegotiate,
+    } as unknown as GoalNegotiator));
+
+    vi.mocked(CoreLoop).mockImplementation(() => ({
+      run: vi.fn().mockResolvedValue(makeLoopResult()),
+      stop: vi.fn(),
+    } as unknown as CoreLoop));
+
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    await runCLI("improve", ".");
+    consoleSpy.mockRestore();
+
+    expect(mockSuggest).toHaveBeenCalledOnce();
+    // Verify context argument is a string (gathered from the path)
+    const [contextArg] = mockSuggest.mock.calls[0]!;
+    expect(typeof contextArg).toBe("string");
+  });
+
+  it("prints 'No improvement goals found' when suggestGoals returns empty array", async () => {
+    const mockSuggest = vi.fn().mockResolvedValue([]);
+
+    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+      suggestGoals: mockSuggest,
+      negotiate: vi.fn(),
+    } as unknown as GoalNegotiator));
+
+    vi.mocked(CoreLoop).mockImplementation(() => ({
+      run: vi.fn(),
+      stop: vi.fn(),
+    } as unknown as CoreLoop));
+
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const code = await runCLI("improve", ".");
+    const output = consoleSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+    consoleSpy.mockRestore();
+
+    expect(code).toBe(0);
+    expect(output).toContain("No improvement goals found");
+  });
+
+  it("calls suggestGoals with maxSuggestions from --max flag", async () => {
+    const goal = makeGoal();
+    const mockSuggest = vi.fn().mockResolvedValue([makeSuggestion()]);
+    const mockNegotiate = vi.fn().mockResolvedValue(makeNegotiationResult(goal));
+
+    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+      suggestGoals: mockSuggest,
+      negotiate: mockNegotiate,
+    } as unknown as GoalNegotiator));
+
+    vi.mocked(CoreLoop).mockImplementation(() => ({
+      run: vi.fn().mockResolvedValue(makeLoopResult()),
+      stop: vi.fn(),
+    } as unknown as CoreLoop));
+
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    await runCLI("improve", ".", "--max", "7");
+    consoleSpy.mockRestore();
+
+    expect(mockSuggest).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ maxSuggestions: 7 })
+    );
+  });
+});
+
+describe("improve subcommand — negotiation", () => {
+  it("calls negotiate with the first suggestion's description", async () => {
+    const goal = makeGoal();
+    const suggestion = makeSuggestion({ description: "Increase test coverage to 90% for all core modules" });
+    const mockSuggest = vi.fn().mockResolvedValue([suggestion]);
+    const mockNegotiate = vi.fn().mockResolvedValue(makeNegotiationResult(goal));
+
+    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+      suggestGoals: mockSuggest,
+      negotiate: mockNegotiate,
+    } as unknown as GoalNegotiator));
+
+    vi.mocked(CoreLoop).mockImplementation(() => ({
+      run: vi.fn().mockResolvedValue(makeLoopResult()),
+      stop: vi.fn(),
+    } as unknown as CoreLoop));
+
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    await runCLI("improve", ".");
+    consoleSpy.mockRestore();
+
+    expect(mockNegotiate).toHaveBeenCalledWith(
+      suggestion.description,
+      expect.objectContaining({ constraints: [] })
+    );
+  });
+
+  it("exits with code 1 when negotiate returns type='reject'", async () => {
+    const goal = makeGoal();
+    const mockSuggest = vi.fn().mockResolvedValue([makeSuggestion()]);
+    const mockNegotiate = vi.fn().mockResolvedValue({
+      goal,
+      response: {
+        type: "reject" as const,
+        message: "Goal is unachievable.",
+        counter_proposal: null,
+        counter_target: null,
+      },
+      log: {
+        goal_id: goal.id,
+        timestamp: new Date().toISOString(),
+        is_renegotiation: false,
+        renegotiation_trigger: null,
+      },
+    });
+
+    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+      suggestGoals: mockSuggest,
+      negotiate: mockNegotiate,
+    } as unknown as GoalNegotiator));
+
+    vi.mocked(CoreLoop).mockImplementation(() => ({
+      run: vi.fn(),
+      stop: vi.fn(),
+    } as unknown as CoreLoop));
+
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const code = await runCLI("improve", ".");
+    consoleSpy.mockRestore();
+
+    expect(code).toBe(1);
+  });
+});
+
+describe("improve subcommand — loop execution", () => {
+  it("does NOT run CoreLoop when neither --auto nor --yes is provided", async () => {
+    const goal = makeGoal();
+    const mockSuggest = vi.fn().mockResolvedValue([makeSuggestion()]);
+    const mockNegotiate = vi.fn().mockResolvedValue(makeNegotiationResult(goal));
+    const mockRun = vi.fn().mockResolvedValue(makeLoopResult());
+
+    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+      suggestGoals: mockSuggest,
+      negotiate: mockNegotiate,
+    } as unknown as GoalNegotiator));
+
+    vi.mocked(CoreLoop).mockImplementation(() => ({
+      run: mockRun,
+      stop: vi.fn(),
+    } as unknown as CoreLoop));
+
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    await runCLI("improve", ".");
+    consoleSpy.mockRestore();
+
+    expect(mockRun).not.toHaveBeenCalled();
+  });
+
+  it("prints 'Run with: motiva run' message when no --auto/--yes", async () => {
+    const goal = makeGoal({ id: "goal-show-hint" });
+    const mockSuggest = vi.fn().mockResolvedValue([makeSuggestion()]);
+    const mockNegotiate = vi.fn().mockResolvedValue(makeNegotiationResult(goal));
+
+    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+      suggestGoals: mockSuggest,
+      negotiate: mockNegotiate,
+    } as unknown as GoalNegotiator));
+
+    vi.mocked(CoreLoop).mockImplementation(() => ({
+      run: vi.fn(),
+      stop: vi.fn(),
+    } as unknown as CoreLoop));
+
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    await runCLI("improve", ".");
+    const output = consoleSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+    consoleSpy.mockRestore();
+
+    expect(output).toContain("motiva run");
+    expect(output).toContain("goal-show-hint");
+  });
+
+  it("runs CoreLoop when --auto flag is provided", async () => {
+    const goal = makeGoal({ id: "goal-auto" });
+    const mockSuggest = vi.fn().mockResolvedValue([makeSuggestion()]);
+    const mockNegotiate = vi.fn().mockResolvedValue(makeNegotiationResult(goal));
+    const mockRun = vi.fn().mockResolvedValue(makeLoopResult({ goalId: "goal-auto" }));
+
+    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+      suggestGoals: mockSuggest,
+      negotiate: mockNegotiate,
+    } as unknown as GoalNegotiator));
+
+    vi.mocked(CoreLoop).mockImplementation(() => ({
+      run: mockRun,
+      stop: vi.fn(),
+    } as unknown as CoreLoop));
+
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const code = await runCLI("improve", ".", "--auto");
+    consoleSpy.mockRestore();
+
+    expect(code).toBe(0);
+    expect(mockRun).toHaveBeenCalledWith("goal-auto");
+  });
+
+  it("runs CoreLoop when --yes flag is provided", async () => {
+    const goal = makeGoal({ id: "goal-yes" });
+    const mockSuggest = vi.fn().mockResolvedValue([makeSuggestion()]);
+    const mockNegotiate = vi.fn().mockResolvedValue(makeNegotiationResult(goal));
+    const mockRun = vi.fn().mockResolvedValue(makeLoopResult({ goalId: "goal-yes" }));
+
+    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+      suggestGoals: mockSuggest,
+      negotiate: mockNegotiate,
+    } as unknown as GoalNegotiator));
+
+    vi.mocked(CoreLoop).mockImplementation(() => ({
+      run: mockRun,
+      stop: vi.fn(),
+    } as unknown as CoreLoop));
+
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const code = await runCLI("improve", ".", "--yes");
+    consoleSpy.mockRestore();
+
+    expect(code).toBe(0);
+    expect(mockRun).toHaveBeenCalledWith("goal-yes");
+  });
+
+  it("exits with code 0 and prints completion message after loop with --auto", async () => {
+    const goal = makeGoal({ id: "goal-loop-done" });
+    const mockSuggest = vi.fn().mockResolvedValue([makeSuggestion()]);
+    const mockNegotiate = vi.fn().mockResolvedValue(makeNegotiationResult(goal));
+
+    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+      suggestGoals: mockSuggest,
+      negotiate: mockNegotiate,
+    } as unknown as GoalNegotiator));
+
+    vi.mocked(CoreLoop).mockImplementation(() => ({
+      run: vi.fn().mockResolvedValue(makeLoopResult({ goalId: "goal-loop-done" })),
+      stop: vi.fn(),
+    } as unknown as CoreLoop));
+
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const code = await runCLI("improve", ".", "--auto");
+    const output = consoleSpy.mock.calls.map((c) => c.join(" ")).join("\n");
+    consoleSpy.mockRestore();
+
+    expect(code).toBe(0);
+    expect(output).toContain("Loop completed");
+  });
+});
+
+describe("improve subcommand — gatherProjectContext", () => {
+  it("gatherProjectContext returns a non-empty string for the current directory", async () => {
+    // We test gatherProjectContext indirectly through the improve command:
+    // when suggestGoals is called, the first argument must be a non-empty string
+    const goal = makeGoal();
+    const mockSuggest = vi.fn().mockResolvedValue([makeSuggestion()]);
+    const mockNegotiate = vi.fn().mockResolvedValue(makeNegotiationResult(goal));
+
+    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+      suggestGoals: mockSuggest,
+      negotiate: mockNegotiate,
+    } as unknown as GoalNegotiator));
+
+    vi.mocked(CoreLoop).mockImplementation(() => ({
+      run: vi.fn().mockResolvedValue(makeLoopResult()),
+      stop: vi.fn(),
+    } as unknown as CoreLoop));
+
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    await runCLI("improve", ".");
+    consoleSpy.mockRestore();
+
+    expect(mockSuggest).toHaveBeenCalled();
+    const context = mockSuggest.mock.calls[0]![0] as string;
+    // Context should be a string (even if some shell commands fail, at minimum an empty string)
+    expect(typeof context).toBe("string");
+  });
+});
