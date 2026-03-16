@@ -235,6 +235,84 @@ const LAYER1_RULES: Layer1Rule[] = [
       return hasDiscrimination || hasHarassmentAutomation || hasProtectedAttributeFilter;
     },
   },
+  {
+    category: "destructive_action",
+    description: "Irreversible destructive operations such as mass deletion, disk wipe, database drop, or data destruction",
+    matches: (input: string): boolean => {
+      const s = input.toLowerCase();
+      // Negation checks: test environments, backups, authorized cleanup, dry-run
+      const isLegitimate =
+        s.includes("test environment") ||
+        s.includes("staging") ||
+        s.includes("sandbox") ||
+        s.includes("dry run") ||
+        s.includes("dry-run") ||
+        s.includes("backup") ||
+        s.includes("rollback") ||
+        s.includes("restore") ||
+        s.includes("authorized cleanup") ||
+        s.includes("recycle bin") ||
+        s.includes("soft delete") ||
+        s.includes("trash");
+      if (isLegitimate) return false;
+      const hasMassDeletion =
+        s.includes("delete all") ||
+        s.includes("rm -rf") ||
+        s.includes("remove all") ||
+        (s.includes("wipe") && (s.includes("disk") || s.includes("drive") || s.includes("data") || s.includes("database") || s.includes("server") || s.includes("system"))) ||
+        (s.includes("erase") && (s.includes("disk") || s.includes("drive") || s.includes("all data") || s.includes("everything")));
+      const hasDatabaseDestroy =
+        s.includes("drop database") ||
+        s.includes("drop all tables") ||
+        (s.includes("destroy") && (s.includes("database") || s.includes("data") || s.includes("all records") || s.includes("production"))) ||
+        (s.includes("truncate") && s.includes("all"));
+      const hasFormatOrDestroy =
+        s.includes("format disk") ||
+        s.includes("format drive") ||
+        s.includes("format hard") ||
+        (s.includes("destroy") && (s.includes("server") || s.includes("infrastructure") || s.includes("cluster") || s.includes("environment"))) ||
+        (s.includes("permanently delete") && (s.includes("all") || s.includes("production") || s.includes("user data") || s.includes("records")));
+      return hasMassDeletion || hasDatabaseDestroy || hasFormatOrDestroy;
+    },
+  },
+  {
+    category: "credential_access",
+    description: "Unauthorized access to, extraction of, or harvesting of passwords, keys, tokens, or credentials",
+    matches: (input: string): boolean => {
+      const s = input.toLowerCase();
+      // Negation checks: own credentials, authorized, credential rotation, password manager
+      const isLegitimate =
+        s.includes("own credentials") ||
+        s.includes("own password") ||
+        s.includes("own keys") ||
+        s.includes("authorized") ||
+        s.includes("authorization") ||
+        s.includes("password manager") ||
+        s.includes("password reset") ||
+        s.includes("credential rotation") ||
+        s.includes("key rotation") ||
+        s.includes("security audit") ||
+        s.includes("penetration test") ||
+        s.includes("pen test") ||
+        s.includes("bug bounty");
+      if (isLegitimate) return false;
+      const hasCredentialTheft =
+        (s.includes("steal") && (s.includes("password") || s.includes("credential") || s.includes("token") || s.includes("key") || s.includes("secret"))) ||
+        (s.includes("theft") && (s.includes("credential") || s.includes("password") || s.includes("token")));
+      const hasCredentialDump =
+        s.includes("dump credentials") ||
+        s.includes("dump passwords") ||
+        s.includes("extract credentials") ||
+        s.includes("extract passwords") ||
+        s.includes("extract api keys") ||
+        s.includes("extract secret") ||
+        (s.includes("harvest") && (s.includes("token") || s.includes("credential") || s.includes("password") || s.includes("key") || s.includes("secret")));
+      const hasUnauthorizedKeyAccess =
+        (s.includes("access") && s.includes("without") && (s.includes("password") || s.includes("credential") || s.includes("permission")) && (s.includes("private key") || s.includes("api key") || s.includes("secret key"))) ||
+        (s.includes("exfiltrate") && (s.includes("credential") || s.includes("password") || s.includes("token") || s.includes("key")));
+      return hasCredentialTheft || hasCredentialDump || hasUnauthorizedKeyAccess;
+    },
+  },
 ];
 
 // ─── System prompt ───
@@ -522,7 +600,7 @@ export class EthicsGate {
 
   /**
    * Evaluate the execution means of a task for ethical concerns.
-   * Intended for Phase 2 integration with TaskLifecycle.
+   * Used by TaskLifecycle to screen proposed execution methods before execution.
    *
    * Steps:
    * 1. Run Layer 1 on combined taskDescription + means

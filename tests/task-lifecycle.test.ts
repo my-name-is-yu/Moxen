@@ -180,7 +180,11 @@ describe("TaskLifecycle", () => {
 
   function createLifecycle(
     llmClient: ILLMClient,
-    options?: { approvalFn?: (task: Task) => Promise<boolean>; logger?: import("../src/logger.js").Logger }
+    options?: {
+      approvalFn?: (task: Task) => Promise<boolean>;
+      logger?: import("../src/logger.js").Logger;
+      adapterRegistry?: import("../src/task-lifecycle.js").AdapterRegistry;
+    }
   ): TaskLifecycle {
     strategyManager = new StrategyManager(stateManager, llmClient);
     return new TaskLifecycle(

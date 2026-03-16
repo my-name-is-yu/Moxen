@@ -43,6 +43,8 @@ export const Layer1RuleCategoryEnum = z.enum([
   "deception_impersonation",
   "security_breach",
   "discrimination_harassment_automation",
+  "destructive_action",
+  "credential_access",
 ]);
 export type Layer1RuleCategory = z.infer<typeof Layer1RuleCategoryEnum>;
 

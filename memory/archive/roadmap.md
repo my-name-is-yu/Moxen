@@ -1,248 +1,356 @@
-# Motiva 実装ロードマップ (Stage 3-6: MVP完成)
+# Motiva ロードマップ
 
-作成日: 2026-03-10
-前提: Stage 1-2 完了（405テスト通過、8モジュール実装済み）
+## 現在地
 
----
-
-## Stage 3 ✅ — Layer 3: セッション・交渉・戦略
-
-### 実装内容
-
-実装順序に依存関係あり。上から順に実装する。
-
-| # | モジュール | ファイル | 依存先 | 規模感 |
-|---|----------|---------|--------|--------|
-| 1 | ✅ LLM抽象化レイヤー | `src/llm-client.ts` | なし（Anthropic SDK） | 小 |
-| 2 | ✅ EthicsGate | `src/ethics-gate.ts` | LLMClient | 中 |
-| 3 | ✅ SessionManager | `src/session-manager.ts` | StateManager | 中 |
-| 4 | ✅ StrategyManager (MVP) | `src/strategy-manager.ts` | DriveScorer, StallDetector | 小 |
-| 5 | ✅ GoalNegotiator | `src/goal-negotiator.ts` | ObservationEngine, StateManager, LLMClient, EthicsGate | 大 |
-
-**詳細:**
-
-1. **LLM抽象化レイヤー** — Anthropic SDKのラッパー。`sendMessage(prompt, options): Promise<LLMResponse>` のインターフェースを定義。テスト時にモック差し替え可能なDI構造にする。レスポンスのZodバリデーション付きパース機能を含む。
-2. **EthicsGate** — 独立クラス。LLM Layer 2判定（reject/flag/pass）を実行。EthicsLogを `~/.motiva/ethics/` に永続化。GoalNegotiatorの Step 0 として呼ばれる。
-3. **SessionManager** — 4種セッションコンテキスト（タスク実行/観測/タスクレビュー/ゴールレビュー）の組み立て。MVPは優先度1〜4の固定テンプレート。タスクレビューセッションには実行者の自己申告を渡さない（バイアス防止）。
-4. **StrategyManager (MVP)** — 単一戦略の逐次管理。状態遷移（active/completed/abandoned）。StallDetectorと連動し、停滞検知時にピボット判断をトリガー。1〜2候補生成 → 最上位を自動選択。
-5. **GoalNegotiator** — 6ステップフロー: Step 0（倫理ゲート）→ Step 1（次元分解）→ Step 2（ベースライン測定）→ Step 3（実現可能性評価）→ Step 4（閾値設定）→ Step 5（応答/カウンター提案）。`character.md` のペルソナをプロンプトに反映。`feasibility_ratio` 閾値は character.md の 2.5 を使用（デフォルト3.0からの変更）。
-
-### 手動テスト
-
-以下は自動テストでは品質を担保できないため、人間による確認が必要。
-
-- [ ] LLM呼び出しが実際に動くか（APIキー設定、レスポンスのパース、エラー時のリトライ）
-- [ ] EthicsGateが危険なゴール（例: 「競合のサーバーをDDoSしたい」）を適切にrejectするか — プロンプト品質の確認
-- [ ] EthicsGateがグレーゾーンのゴール（例: 「競合の公開情報を収集したい」）を適切にflagするか
-- [ ] GoalNegotiatorが曖昧なゴール（例: 「売上を2倍にしたい」）を適切な次元に分解できるか
-- [ ] feasibility_ratio計算とカウンター提案の妥当性（非現実的なゴールに対して適切な代替案を出すか）
-- [ ] character.mdのペルソナがプロンプトに適切に反映されているか（口調、判断基準）
-- [ ] LLM呼び出し1回あたりのトークン消費量の計測
-
-### ゲート条件
-
-Stage 4に進むために、以下をすべて満たすこと。
-
-1. ✅ 全ユニットテスト通過（LLMモック使用）
-2. ✅ 実際のAnthropic APIでGoalNegotiatorの一連のフロー（ゴール入力 → 倫理チェック → 次元分解 → 実現可能性評価 → 応答）が動作する（手動確認）
-3. ✅ EthicsGateが明らかに不適切なゴールをrejectする（3種以上のケースで手動確認）
-4. ✅ 交渉ログが `~/.motiva/goals/<goal_id>/` に正しく永続化される
-5. ✅ SessionManagerの4種コンテキストが正しい情報のみを含む（特にレビューセッションにバイアス情報が混入しない）
-
-### 自動テスト vs 手動テスト
-
-| 項目 | 自動テスト | 手動テスト |
-|------|----------|----------|
-| LLMClient のインターフェース準拠 | モックで検証可 | APIキー・ネットワーク・レスポンス形式は手動 |
-| EthicsGate の判定ロジック | モックLLMで3分岐（reject/flag/pass）を検証可 | プロンプト品質・判定精度は手動 |
-| SessionManager のコンテキスト組み立て | 全4種のコンテキスト内容を自動検証可 | — |
-| StrategyManager の状態遷移 | 全遷移パスを自動検証可 | — |
-| GoalNegotiator の6ステップフロー | モックLLMでフロー制御・エラーハンドリングを検証可 | 次元分解の品質・カウンター提案の妥当性は手動 |
-| 永続化 | ファイル書き込み・読み込みの正確性は自動検証可 | — |
+Stage 1-14 完了。Milestone 1-7 完了（3282テスト、90テストファイル）。Dogfooding Phase A/B 完了。GitHub Issueアダプタ・FileExistenceDataSourceAdapter・能力自律調達フルサイクル・ホットプラグ・Goal Tree Phase 2・横断ポートフォリオ Phase 2・学習パイプライン Phase 2 実装済み。詳細は `docs/status.md` 参照。
 
 ---
 
-## Stage 4 ✅ — Layer 0 + Layer 4: アダプター + タスクライフサイクル
+## ロードマップ概要
 
-### 実装内容
+Motivaは**ユニバーサルタスク発見エンジン**だ — コーディングだけでなく、どんなゴールにも適用できる。Dogfoodingはトラックではなく、各マイルストーンの**検証手段**として組み込まれている。
 
-| # | モジュール | ファイル | 依存先 | 規模感 |
-|---|----------|---------|--------|--------|
-| 1 | ✅ AdapterLayer | `src/adapter-layer.ts`, `src/adapters/claude-code-cli.ts`, `src/adapters/claude-api.ts` | なし | 中 |
-| 2 | ✅ TaskLifecycle | `src/task-lifecycle.ts` | DriveScorer, SessionManager, TrustManager, StrategyManager, AdapterLayer | 大 |
-
-**詳細:**
-
-1. **AdapterLayer** — エージェント委譲の抽象化インターフェース。MVP実装は2つ: Claude Code CLIアダプター（`claude` コマンドのspawn）とClaude APIアダプター（Anthropic SDK直接呼び出し）。既存PoCの `src/adapters/claude-code.ts` のパターンを参考にしつつ再実装。入出力の型定義、タイムアウト制御、プロセス管理を含む。
-2. **TaskLifecycle** — タスクの全ライフサイクルを管理。タスク選択（DriveScorer優先度）→ タスク生成（LLMによるプロンプト構築）→ 実行（AdapterLayer経由）→ 3層検証（L0機械的/L1独立レビュー/L2自己申告）→ 失敗対応（keep/discard/escalate）。可逆性タグ（reversible/irreversible/unknown）判定と不可逆アクション時の人間承認フロー。`consecutive_failure_count` 管理（task-lifecycle.md 2.8 に準拠）。
-
-### 手動テスト
-
-- [ ] Claude Code CLIアダプターが実際にClaude Codeプロセスを起動してタスクを実行できるか
-- [ ] Claude Code CLIのstdout/stderrパースが正しく動作するか
-- [ ] タスク生成のプロンプト品質（成功基準が具体的か、スコープ境界が明確か）
-- [ ] 3層検証の動作確認（特にL0 vs L1で矛盾が発生した場合の解消ロジック）
-- [ ] 不可逆アクション検出と人間承認フロー（CLI上でのプロンプト表示と入力待ち）
-- [ ] 失敗時のkeep/discard/escalate判定の妥当性
-- [ ] タスク実行のタイムアウト制御が動作するか
-
-### ゲート条件
-
-1. ✅ 全ユニットテスト通過（AdapterLayerはモック、TaskLifecycleはモックAdapter使用）
-2. ✅ 実際のClaude Code CLIで簡単なタスク（例: 指定ディレクトリにテストファイルを作成）の生成 → 実行 → 検証の一連フローが完走する（手動確認）
-3. ✅ 不可逆アクション検出時に承認要求が表示される（手動確認）
-4. ✅ タスク失敗時のエスカレーション（StallDetectorへの通知）が動作する（手動確認）
-5. ✅ `consecutive_failure_count` が正しくインクリメント・リセットされる
-
-### 自動テスト vs 手動テスト
-
-| 項目 | 自動テスト | 手動テスト |
-|------|----------|----------|
-| AdapterLayer インターフェース準拠 | モックで検証可 | — |
-| Claude Code CLI プロセス起動・制御 | — | 実プロセスのspawn/kill/timeoutは手動 |
-| Claude API 呼び出し | モックで検証可 | 実APIでのレスポンス形式は手動 |
-| タスク生成ロジック | モックLLMでフロー検証可 | プロンプト品質は手動 |
-| 3層検証フロー | モックで全パターン（一致/矛盾/部分一致）検証可 | — |
-| 可逆性判定 | 既知パターンのテストケースで検証可 | LLM判定の精度は手動 |
-| 人間承認フロー | — | CLI上のインタラクションは手動 |
-| keep/discard/escalate 分岐 | 全分岐を自動検証可 | 判定の妥当性は手動 |
-| failure_count 管理 | 自動検証可 | — |
+| Milestone | テーマ | 検証方法 |
+|-----------|--------|----------|
+| **1** | 観測強化（LLM-powered観測） | READMEゴールで2ループ検証 |
+| **2** | 中規模Dogfooding（3テーマ） | 実戦での結合バグ検出 |
+| **3** | npm publish & パッケージ化 | Motivaに「publishできる状態にする」ゴールを与える |
+| **4** | 永続ランタイム Phase 2（旧 Stage 10 Phase 2） | Motivaをデーモンとして自律運用 |
+| **5** | 意味的埋め込み Phase 2（旧 Stage 12 Phase 2） | 複数ゴール横断のナレッジ検索検証 |
+| **6** | 能力自律調達 Phase 2（旧 Stage 13 Phase 2） | Motiva自身の新能力調達を委譲 |
+| **7** | 再帰的Goal Tree & 横断ポートフォリオ Phase 2（旧 Stage 14 Phase 2） | 大規模ゴールの木分解と並列実行 |
 
 ---
 
-## Stage 5 ✅ — Layer 5: コアループ + レポーティング
+## Milestone 1: 観測強化（LLM-powered観測）
 
-### 実装内容
+**テーマ**: `self_report` に依存しない、実質的な観測基盤を作る。現状の `self_report` はエージェントが自己申告した値をそのまま記録するだけで、複雑なゴール（品質改善など）には使えない。
 
-| # | モジュール | ファイル | 依存先 | 規模感 |
-|---|----------|---------|--------|--------|
-| 1 | ✅ ReportingEngine (MVP) | `src/reporting-engine.ts` | StateManager | 小 |
-| 2 | ✅ CoreLoop | `src/core-loop.ts` | ObservationEngine, GapCalculator, DriveScorer, TaskLifecycle, SatisficingJudge, StallDetector, ReportingEngine | 大 |
+### C-1: LLM-powered observation実装
 
-**詳細:**
+**実装内容**:
+- `ObservationEngine.observe()` にLLM呼び出しを追加
+  - DataSourceで値が取れない次元に対してLLM評価を実行
+  - ワークスペースのファイル内容をアダプタ経由で取得 → LLMに渡して0-1スコアを返させる
+  - 信頼度: `independent_review` tier (0.50–0.84)
+- LLM観測プロンプト例:
+  ```
+  以下のファイル内容を読み、「{次元ラベル}」を0.0〜1.0で評価してください。
+  ゴール: {goal.description}
+  閾値（目標値）: {threshold}
+  ファイル: {content}
+  回答: {"score": 0.0〜1.0, "reason": "..."}
+  ```
+- 既存DataSource（FileExistence等）で取得可能な次元はDataSource優先
 
-1. **ReportingEngine (MVP)** — 3種レポート生成: 実行サマリー（毎ループ）、日次サマリー、週次レポート。Markdown出力を `~/.motiva/reports/` に保存。CLIログ表示（進捗バー的なフォーマット）。通知種別: 緊急/承認要求/停滞エスカレーション/完了/能力不足。
-2. **CoreLoop** — Motivaの心臓部。1ループ = observe → gap → score → task → execute → verify → report。SatisficingJudgeの完了判断で停止。StallDetector連動でStrategyManagerピボット。ループ間の状態引き継ぎ（前ループの観測結果を次ループの入力に）。エラーハンドリング（任意のステップでの失敗からの復旧）。
+**成功基準**:
+- [x] `observe()` がLLM観測を実行し `independent_review` 信頼度でスコアを返す
+- [x] DataSource未設定の次元でもLLM観測でギャップ計算が進む
 
-**注意: Stage 5開始前に解決必須の数値不整合:**
-- `progress_ceiling` の値: observation.md では 0.70/0.90、satisficing.md では 0.60/0.85 と記載が異なる。CoreLoopが両モジュールを接続するため、この不整合を解消してから実装に入ること。
+### C-2: 観測プロンプト改善
 
-### 手動テスト
+**実装内容**:
+- 次元ごとにプロンプトを最適化（ゴールの `description` + 次元の `label` + `threshold` を含める）
+- DataSource観測とLLM観測の結果をマージするロジック
+  - DataSourceが取得できた場合 → DataSource優先（信頼度: `mechanical`）
+  - 取得できない場合 → LLM観測にフォールバック（信頼度: `independent_review`）
+- 次元名の不一致検出: DataSourceの次元名とゴール次元名が一致しない場合に警告ログ出力
 
-- [ ] CoreLoopの1周が正しい順序で全モジュールを呼び出すか（ログで確認）
-- [ ] レポートの可読性（Markdown出力の品質、情報の過不足）
-- [ ] 停滞検知 → StrategyManagerピボット → 新タスク生成の連鎖が動くか
-- [ ] SatisficingJudgeの完了判断が適切なタイミングで発火するか（早すぎず遅すぎず）
-- [ ] 複数ループにわたるゴール進捗の蓄積が正しいか（5ループ以上の連続実行）
-- [ ] エラー発生時（LLMタイムアウト、ファイルI/Oエラー等）にループが安全に停止するか
-- [ ] LLM呼び出し回数の計測（1ループあたりの呼び出し数とコスト）
+**成功基準**:
+- [x] 次元ごとに適切な信頼度でスコアが返る
+- [x] 不一致次元名に対して警告が出る
 
-### ゲート条件
+### C-3: 観測精度テスト
 
-1. ✅ 全ユニットテスト通過（全依存モジュールをモック）
-2. ✅ 簡単なゴール（例: 「このディレクトリにREADME.mdを作成する」）で、CoreLoopが観測 → ギャップ計算 → タスク生成 → 実行 → 検証 → 完了判断まで自動で回る（手動確認）
-3. ✅ レポートファイルが `~/.motiva/reports/` に正しく生成される
-4. ✅ 停滞シナリオ（意図的に失敗させる）でエスカレーションが動作する（手動確認）
-5. ✅ `progress_ceiling` の数値不整合が解消されている
-6. ✅ 1ループあたりのLLM呼び出し回数が想定範囲内（最大5回）であることを確認
+**実装内容**:
+- モック環境でLLM観測が正しいスコアを返すか確認するテスト
+- `FileExistenceDataSource` + LLM観測の併用テスト
+- 観測結果がギャップ計算→タスク生成の正しいインプットになるかE2E確認
 
-### 自動テスト vs 手動テスト
+**成功基準**:
+- [x] LLM観測テストがvitestで通過
+- [x] FileExistence + LLM観測の併用でループ1周が完走する
 
-| 項目 | 自動テスト | 手動テスト |
-|------|----------|----------|
-| CoreLoop のステップ実行順序 | モックで全ステップの呼び出し順序を検証可 | — |
-| ループ間の状態引き継ぎ | モックで検証可 | — |
-| 停滞→ピボット連鎖 | モックで検証可 | 実環境での判断品質は手動 |
-| SatisficingJudge 完了発火 | モックで閾値境界テスト可 | 実ゴールでのタイミング妥当性は手動 |
-| ReportingEngine 出力形式 | スナップショットテストで検証可 | 可読性は手動 |
-| エラーハンドリング | 各ステップの例外注入で検証可 | — |
-| E2E（ゴール → 完了） | — | 実LLM + 実CLIで手動 |
-
----
-
-## Stage 6 ✅ — Layer 6: CLIランナー
-
-### 実装内容
-
-| # | モジュール | ファイル | 依存先 | 規模感 |
-|---|----------|---------|--------|--------|
-| 1 | ✅ CLIRunner | `src/cli-runner.ts`, `src/index.ts`（エントリーポイント） | CoreLoop, DriveSystem, ReportingEngine, GoalNegotiator | 小 |
-
-**詳細:**
-
-1. **CLIRunner** — Motivaのエントリーポイント。サブコマンド構成:
-   - `motiva run` — CoreLoopを1回実行（イベントキューのポーリング含む）
-   - `motiva goal add "<description>"` — GoalNegotiatorを起動してゴールを登録
-   - `motiva goal list` — 登録済みゴール一覧表示
-   - `motiva status` — 現在の進捗レポート表示
-   - `motiva report` — 最新レポートの表示
-
-   引数パースはNode.js組み込みの `parseArgs` または軽量ライブラリ。終了コード: 0（正常完了/ゴール達成）、1（エラー）、2（停滞エスカレーション）。`~/.motiva/` ディレクトリの初期化処理。設定ファイル（APIキー等）の読み込み。
-
-### 手動テスト
-
-- [ ] `motiva run` でCoreLoopが起動し、1ループ完走するか
-- [ ] `motiva goal add "READMEを作成する"` でGoalNegotiatorが起動し、対話的にゴールが登録されるか
-- [ ] `motiva goal list` で登録済みゴールが表示されるか
-- [ ] `motiva status` でレポートが表示されるか
-- [ ] 終了コードが適切か（正常: 0、エラー: 1、エスカレーション: 2）
-- [ ] 初回起動時の `~/.motiva/` ディレクトリ自動作成
-- [ ] APIキー未設定時のエラーメッセージが適切か
-- [ ] Ctrl+C でのグレースフルシャットダウン
-
-### ゲート条件
-
-1. ✅ 全サブコマンドのユニットテスト通過
-2. [ ] E2Eテスト: `motiva goal add "..." && motiva run` で完結するシナリオが動作する（手動確認）
-3. [ ] **MVP完成の定義**: 簡単な実世界タスク（例: 指定リポジトリにREADME.mdを作成してコミットする）をゴールとして与え、Motivaが自律的に完了まで持っていける
-4. [ ] エラーケース（APIキー未設定、ネットワーク不通、不正な引数）で適切なエラーメッセージが表示される
-
-### 自動テスト vs 手動テスト
-
-| 項目 | 自動テスト | 手動テスト |
-|------|----------|----------|
-| 引数パース | 全サブコマンド・オプションを自動検証可 | — |
-| 終了コード | 各シナリオの終了コードを自動検証可 | — |
-| ディレクトリ初期化 | テンポラリディレクトリで自動検証可 | — |
-| エラーメッセージ | スナップショットテストで検証可 | 可読性は手動 |
-| E2E（goal add → run → 完了） | — | 実環境で手動（MVP完成判定） |
-| グレースフルシャットダウン | — | シグナルハンドリングは手動 |
+**Milestone 1 Dogfooding検証**: ゴール「MotivaのREADME品質を改善する」を再実行し、LLM観測が `independent_review` 信頼度で正しくスコアを返すことを2ループで確認する。
 
 ---
 
-## 全体を通したリスクと注意点
+## Milestone 2: 中規模Dogfooding検証
 
-### コスト制御
+**Status**: 完了 ✅
 
-各ステージでのLLM API使用量を把握すること。特にStage 5でCoreLoopが回り始めると、1ループあたり最大5回のLLM呼び出しが発生する。開発中はモックを活用し、手動テスト時のみ実APIを使用する運用を推奨。
+**前提**: Milestone 1（LLM-powered観測）の完了。
 
-### 数値不整合（Stage 5前に解決必須）
+**テーマ**: 観測基盤が整った状態で、より複雑なゴールを試す。タスク品質・dedup・satisficingの実戦検証。
 
-`progress_ceiling` の値が設計ドキュメント間で不整合:
-- `observation.md`: 検証なし 0.70 / 検証あり 0.90
-- `satisficing.md`: 検証なし 0.60 / 検証あり 0.85
+### D-1: README品質ゴール
 
-Stage 5（CoreLoop）で ObservationEngine と SatisficingJudge を接続する前に、どちらの値を採用するか確定すること。
+- **次元**: `readme_quality`（LLMがREADME.mdを評価）、`installation_guide_present`、`usage_example_present`
+- **観測方法**: LLM観測（独立レビュー）
+- **検証ポイント**: LLM観測の精度、タスク生成品質
+- **成功基準**: [x] 2ループ以内に収束
 
-→ ✅ 解決済み: ObservationEngineとSatisficingJudgeが意図的に異なるceiling値を使用。各モジュールが独立に適用し、CoreLoopでの二重適用なし。
+### D-2: E2Eループテスト自動化ゴール
 
-### character.md 関連
+- **次元**: `e2e_test_file_exists`（FileExistenceDataSource）、`e2e_test_passing`（LLM観測）、`approval_loop_fixed`
+- **観測方法**: FileExistenceDataSource + LLM観測の併用
+- **検証ポイント**: DataSource + LLM観測の組み合わせ、ループ収束
+- **成功基準**: [x] DataSource + LLM観測の併用で1ループ完走
 
-`feasibility_ratio` 閾値が character.md では 2.5（デフォルト3.0からの変更）に設定されている。GoalNegotiator実装時にこの値を反映すること。
+### D-3: npm publish準備ゴール
 
-### テスト戦略の原則
+- **次元**: `package_json_valid`（LLM観測: bin/main/exports設定）、`build_succeeds`（FileExistence: dist/ファイル存在）、`version_set`
+- **観測方法**: LLM観測 + FileExistenceDataSource
+- **検証ポイント**: 重複タスク防止（dedup）、satisficing判定
+- **成功基準**: [x] satisficing判定が正しく動作しループが過剰に続かない
 
-- **ユニットテスト**: 全モジュールで必須。LLM呼び出しはすべてモック。ファイルI/Oはテンポラリディレクトリを使用。
-- **統合テスト**: Stage 5以降で、モジュール間の接続を検証。モックLLMを使用。
-- **E2Eテスト**: Stage 6完了時に、実LLM + 実CLIでの動作確認。手動実施。
-- **スナップショットテスト**: レポート出力、エラーメッセージなどの形式検証に使用。
+---
 
-### 実装の累積テスト数の目安
+## Milestone 3: npm publish & パッケージ化
 
-| ステージ | 新規テスト数（目安） | 累積テスト数（目安） |
-|---------|-------------------|-------------------|
-| Stage 1-2（完了） | 405 | 405 |
-| Stage 3 | 実績 258 | 累積 663 |
-| Stage 4 | 実績 139 | 累積 802 |
-| Stage 5 | 実績 120 | 累積 922（17ファイル）|
-| Stage 6 | 実績 61 | 累積 983（18ファイル）|
+**テーマ**: Motivaを外部から使えるnpmパッケージとして整備する。Motiva自身に「npm publishできる状態にする」ゴールを与え、自分で自分を整備させる。
+
+**実装内容**:
+- `package.json` の `bin`/`main`/`exports`/`types` フィールド整備
+- `npm run build` → `dist/` 出力の確認、TypeScript宣言ファイル生成
+- `README.md` のインストール手順・使用例の充実
+- バージョン戦略（semver）の確立
+- GitHub Actions: `npm publish` の自動化（タグトリガー）
+
+**Dogfooding検証**: Milestone 2のD-3「npm publish準備ゴール」の完了をそのまま検証とする。Motivaが自律的に `package.json` 不足を検出し、issueを起票し、解決まで追跡できれば合格。
+
+---
+
+## Milestone 4: 永続ランタイム Phase 2
+
+**ビジョン対応**: 1. Goal-and-forget / 2. 年単位の永続動作 / 3. プッシュ型の自己報告
+
+Stage 10でデーモンモード・イベント駆動・プッシュ報告のMVPは実装済み。Phase 2ではそれらを実用レベルに強化する。
+
+### 4.1 デーモンモード強化
+
+設計: `docs/runtime.md` Phase 2b
+
+- グレースフルシャットダウンとクラッシュリカバリの実装完成
+- 状態復元: プロセス再起動後に中断地点から再開
+- ログローテーション（サイズ/日付ベース）
+- `motiva cron` コマンドでcrontabエントリーを出力（デーモン不要ユーザー向け）
+
+### 4.2 イベント駆動システム強化
+
+設計: `docs/design/drive-system.md` Phase 2
+
+- ファイルウォッチャー（`~/.motiva/events/` リアルタイム監視）
+- ローカルHTTPエンドポイント（`127.0.0.1:41700`、webhook受信）強化
+- 外部イベントからの駆動トリガー（即時評価）
+
+### 4.3 プッシュ報告強化
+
+設計: `docs/design/reporting.md` Phase 2
+
+- Slack Webhook（コンパクト形式）
+- メール（SMTP、HTML形式）
+- Do Not Disturb機能（時間帯ベースの通知抑制、緊急アラート・承認要求は例外）
+- Slackボタンによるインタラクティブ承認応答
+- ゴール別レポーティング設定オーバーライド（頻度・詳細度）
+
+### 4.4 記憶ライフサイクル MVP（10.5）
+
+設計: `docs/design/memory-lifecycle.md` Phase 1
+
+- 3層記憶モデル（Working / Short-term / Long-term）基盤実装
+- Short-term: 設定可能な保持期間管理（ループ数/時間ベース）
+- Short→Long 圧縮: LLMによる要約生成（パターン抽出、教訓の蒸留）
+- 要約品質保証: 失敗パターン保持確認、矛盾検知
+- ガベージコレクション: サイズ制限（Short-term: ゴールあたり10MB、Long-term: 全体100MB）
+
+**Dogfooding検証**: Motivaをデーモンとして24時間動かし、プッシュ通知が正しいタイミングで届くこと、ループ再起動後に状態が復元されることを確認する。
+
+---
+
+## Milestone 5: 意味的埋め込み Phase 2
+
+**ビジョン対応**: 5. 自律的知識獲得（高度化）
+
+Stage 12で埋め込み基盤（EmbeddingClient, VectorIndex, KnowledgeGraph, GoalDependencyGraph）は実装済み。Phase 2ではこれらを実用的な機能として活かす。
+
+### 5.1 知識獲得 Phase 2 完成（12.2 残り）
+
+設計: `docs/design/knowledge-acquisition.md` Phase 2
+
+- ゴール横断共有ナレッジベース（ゴール別JSONからの移行）
+- 意味的埋め込みによるベクトル検索（異なるゴール間での暗黙的知識共有）
+- ドメイン安定性に基づく自動再検証スケジュール
+
+### 5.2 記憶ライフサイクル Phase 2（12.7）
+
+設計: `docs/design/memory-lifecycle.md` Phase 2
+
+- Drive-based Memory Management: DriveScorer連携（不満駆動・締切駆動・機会駆動での圧縮優先度制御）
+- 意味的検索によるWorking Memory選択（12.1 埋め込み基盤を使ったタグ完全一致 → 埋め込みベースへの移行）
+- Long-term教訓のゴール横断検索
+
+### 5.3 セッション・コンテキスト Phase 2（12.6）
+
+設計: `docs/design/session-and-context.md` Phase 2
+
+- バジェットベースの動的コンテキスト選択（MVPの固定top-4から、トークンバジェットに応じた動的選択へ）
+- ゴール依存グラフの活用（resource_conflict時の排他制御）
+
+**Dogfooding検証**: 複数の異なるゴールを同時に与え、一方のゴールで学んだ知識が別ゴールの観測・タスク生成に活用されることを確認する。
+
+---
+
+## Milestone 6: 能力自律調達 Phase 2
+
+**Status**: 完了 ✅
+
+**ビジョン対応**: 6. 現実世界との接続 / 7. 自律的ツール調達
+
+Stage 13でCapabilityDetector拡張・DataSourceAdapterは実装済み。Phase 2ではフルサイクル（能力不足検出→調達→検証→登録）を完成させた。
+
+### 6.1 能力自律調達フルサイクル（M6.1a + M6.1b）
+
+- CoreLoopに `capability_acquiring` ハンドラ追加 — 検出→委譲→検証→登録のフルサイクル
+- CLI: `capability list`, `capability remove` サブコマンド追加
+- `data_source_setup` タスクタイプ追加（データソース設定委譲用）
+
+### 6.2 Capability Registryの動的管理（M6.2a + M6.2b）
+
+- `DataSourceRegistry.upsert()` 追加 — ObservationEngineへの動的追加/削除
+- 能力依存解決: トポロジカルソート + 循環依存検出
+
+**実装結果**: 43テスト追加（3105テスト合計、83テストファイル）。
+
+---
+
+## Milestone 7: 再帰的Goal Tree & 横断ポートフォリオ Phase 2
+
+**Status**: 完了 ✅
+
+**ビジョン対応**: 9. 再帰的Goal Tree + ポートフォリオ
+
+Stage 14でGoalTreeManager・StateAggregator・TreeLoopOrchestrator・CrossGoalPortfolio・LearningPipelineは実装済み。Phase 2では実運用レベルの安定化と高度化を完成させた。
+
+### 7.1 Goal Tree Phase 2
+
+#### 7.1a: Concreteness Scoring & Auto-Stop
+- `scoreConcreteness()` — LLMベース4次元評価（具体性スコアリング）
+- `decompose()` auto-stop — 具体性閾値到達時に自動停止
+- maxDepth強制（デフォルト: 5）
+- 21テスト追加（goal-tree-concreteness.test.ts）
+
+#### 7.1b: Quality Metrics & Pruning Stabilization
+- `evaluateDecompositionQuality()` — coverage, overlap, actionability, depthEfficiency評価
+- `pruneSubgoal()` — 理由トラッキング付き剪定 + `getPruneHistory()`
+- `restructure()` — 品質評価付き再構成 + 自動リバート
+- 23テスト追加（goal-tree-quality.test.ts）
+
+### 7.2 ゴール横断ポートフォリオ Phase 2
+
+#### 7.2a: Momentum Allocation & Dependency Scheduling
+- `calculateMomentum()` — velocity、トレンド検出
+- `buildDependencySchedule()` — トポロジカルソート、クリティカルパス
+- `allocateResources()` — momentum & dependency_aware戦略
+- `rebalanceOnStall()` — スタル検出とリソース再分配
+- 17テスト追加（cross-goal-portfolio-phase2.test.ts）
+
+#### 7.2b: Embedding-Based Template Recommendation
+- `indexTemplates()` — 全テンプレートをVectorIndexに埋め込み登録
+- `recommendByEmbedding()` — 類似度ベース推薦
+- `recommendHybrid()` — タグ + 埋め込みスコア統合推薦
+- 11テスト追加（strategy-template-embedding.test.ts）
+
+### 7.3 学習パイプライン Phase 2
+
+#### 7.3a: 4-Step Structural Feedback
+- `recordStructuralFeedback()` — 全4タイプ対応（observation_accuracy, strategy_selection, scope_sizing, task_generation）
+- `aggregateFeedback()` — 平均値・トレンド・最悪領域算出
+- `autoTuneParameters()` — フィードバック駆動パラメータ提案
+- 16テスト追加（learning-pipeline-phase2.test.ts）
+
+#### 7.3b: Cross-Goal Pattern Sharing
+- `extractCrossGoalPatterns()` — 複数ゴールにわたるパターン抽出
+- `sharePatternsAcrossGoals()` — パターンを新規ゴールに適用
+- `storePattern()` / `retrievePatterns()` — KnowledgeTransferでの永続化
+- 13テスト追加（learning-cross-goal.test.ts）
+
+**実装結果**: 163テスト追加（3282テスト合計、90テストファイル）。
+
+**Dogfooding検証** (2026-03-16 完了):
+- gpt-5.3-codexで2イテレーション実行
+- Goal Tree自動分解成功（親ゴールから子ゴールが正確に生成され、個別実行）
+- バグ修正4件: auto-decompose（runTreeIterationで自動呼び出し）、specificity skip（scoreConcreteness部分適用修正）、prompt改善（decompose次元の値明示）、threshold_type sanitize
+- 3282テスト全パス確認
+
+---
+
+## Phase E: 大規模ゴール（将来）
+
+Milestone 1-7 の安定化後に着手する探索的テーマ。
+
+- **「Motivaのコード品質を改善する」** — 全ソースのリファクタリング提案をissue起票、ゴール木として追跡
+- **「Motivaを完成させる」** — ロードマップに沿った残機能実装の自動追跡、学習パイプラインへの蓄積
+
+各段階で学んだことをMotiva自身のLearningPipelineに蓄積し、次のゴールに知識転移する。
+
+---
+
+## Lessons Learned（Phase A/B Dogfoodingから）
+
+将来のMilestoneで活きる教訓。
+
+1. **DataSource次元名とゴール次元名の不一致がスタックの最大原因**
+   - DataSourceが返す次元名（例: `file_exists`）とゴール定義の次元名（例: `readme_completeness`）が一致しないと観測値が使われず、ループが前進しない
+   - Milestone 1 C-2で不一致検出の警告ログを追加する
+
+2. **`--yes` フラグがないと承認ループで止まる**
+   - インタラクティブな承認プロンプトがある限り、自動実行ができない
+   - Dogfoodingでは常に `--yes` を使う。承認が必要な場面では明示的に除外する
+
+3. **ファイルパス設定ミスで観測がずれる → 設定検証の仕組みが必要**
+   - Phase Bで `GETTING_STARTED.md` → `docs/getting-started.md` の修正が必要だった
+   - DataSource設定時にファイルパスの存在チェックや正規化を行う仕組みを将来整備する
+
+4. **`self_report` 観測は実質何もしない → LLM-powered観測が必須**
+   - `self_report` はエージェントが自己申告した値をそのまま記録するだけ
+   - 複雑なゴール（品質改善など）ではLLMが独立してワークスペースを評価する必要がある（Milestone 1 C-1）
+
+5. **単純なゴールでも多くのバグが見つかる → Dogfoodingの価値は高い**
+   - Phase Bの1ゴールだけで、次元名不一致・ファイルパスミス・`--yes`フラグ不足など複数の問題が露見した
+   - 実際のゴールを動かすことでユニットテストでは発見できない結合バグが見つかる
+
+---
+
+## リスクフラグ
+
+| リスク | 該当Milestone | 対応方針 |
+|--------|--------------|----------|
+| LLM観測の精度とコスト | M1 | 観測1回あたりの推定コストを計測。高コストな次元はキャッシュ優先 |
+| DataSource次元名不一致 | M1 | 不一致検出の警告ログ（C-2）が安全弁。将来的に自動マッピング提案 |
+| Node.jsデーモン化のプロセス管理 | M4 | pm2等の外部ツール依存を検討。設計フェーズで技術選定 |
+| プッシュ通知の信頼性と頻度制御 | M4 | 通知疲れを避ける設計が必要。MVP時はSlack webhookに絞る |
+| LLM要約による情報欠落 | M4 | 要約品質の検証が必要。MVPでは比率チェックで代替、Phase 2で完全照合 |
+| 埋め込みモデルの技術選定 | M5 | IEmbeddingClient抽象化済み（OpenAI/Ollama/Mock）。選定は実測コストで判断 |
+| ベクトル検索のスケーラビリティ | M5 | ローカルファイルベースから開始し、必要に応じて外部DBに移行 |
+| 能力自律調達の安全性 | M6 | EthicsGateとの統合を密に。エージェントが作成するツールの検証が不可欠 |
+| N層Goal Tree分解の品質 | M7 | 分解の深さ・粒度をLLMに依存する。検証ループと人間レビューの併用 |
+| ゴール横断ポートフォリオの複雑性 | M7 | 単一ゴール内の並列化が安定してから着手。段階的なリスク管理 |
+
+---
+
+## 設計ドキュメントとの対応
+
+| 設計ドキュメント | 対応Milestone | フェーズ |
+|----------------|--------------|---------|
+| `observation.md` | M1 (C-1, C-2) | Phase 2 (LLM観測) |
+| `runtime.md` | M4 (4.1) | Phase 2b |
+| `drive-system.md` | M4 (4.2) | Phase 2 |
+| `reporting.md` | M4 (4.3) | Phase 2 |
+| `memory-lifecycle.md` | M4 (4.4 MVP), M5 (5.2 Phase 2) | Phase 1, 2 |
+| `knowledge-acquisition.md` | M5 (5.1) | Phase 2 |
+| `session-and-context.md` | M5 (5.3) | Phase 2 |
+| `execution-boundary.md` | M6 (6.1) | Phase 2 |
+| `portfolio-management.md` | M7 (7.2) | Phase 3 |
+| `mechanism.md` (学習パイプライン) | M7 (7.3) | Phase 2 |
+| `vision.md` (Goal Tree) | M7 (7.1) | -- |

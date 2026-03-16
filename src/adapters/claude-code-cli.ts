@@ -4,10 +4,11 @@
 // The task prompt is passed via stdin and the --print flag is used
 // for non-interactive (print-mode) execution.
 //
-// TODO: verify exact CLI flags against the installed claude CLI version.
-// Current assumptions based on Claude Code CLI docs (as of 2026-03):
-//   - `--print` enables non-interactive print mode
-//   - prompt is delivered via stdin
+// Verified flags (claude CLI, 2026-03):
+//   -p / --print  — non-interactive print mode; prints response and exits.
+//                   Workspace trust dialog is skipped in this mode.
+//                   Prompt can be supplied as a positional argument or via stdin.
+//   --dangerously-skip-permissions — bypasses all permission checks (use in sandboxes only)
 // If the CLI signature changes, update the spawnArgs array below.
 
 import { spawn } from "node:child_process";
@@ -33,8 +34,8 @@ export class ClaudeCodeCLIAdapter implements IAdapter {
     const startedAt = Date.now();
 
     return new Promise<AgentResult>((resolve) => {
-      // TODO: verify --print flag works for your installed claude CLI version.
-      // Alternative: omit --print and rely purely on stdin piping.
+      // --print (-p): verified non-interactive flag; prints response and exits.
+      // Prompt is written to stdin below; the CLI reads it when running in pipe mode.
       const spawnArgs: string[] = ["--print"];
 
       const child = spawn(this.cliPath, spawnArgs, {

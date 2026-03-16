@@ -20,10 +20,9 @@ Motiva knows when to stop. Rather than pursuing perfection, it applies *satisfic
 
 **Requirements:** Node.js 18+, an OpenAI or Anthropic API key.
 
-### Installation (npm)
+### Installation
 
 ```bash
-# Install from npm (recommended)
 npm install -g motiva
 
 # Set your API key (OpenAI is the default provider)
@@ -37,8 +36,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
 ### First Run
 
 ```bash
-# Register a goal (launches goal negotiation — Motiva will assess feasibility
-# and propose measurable dimensions)
+# Register a goal (Motiva assesses feasibility and proposes measurable dimensions)
 motiva goal add "Create a comprehensive README for this project"
 
 # Run one iteration of the core loop
@@ -59,17 +57,11 @@ On first run, Motiva initializes its state directory at `~/.motiva/`.
 ### Development Installation
 
 ```bash
-# Clone and build from source
-git clone https://github.com/your-org/motiva.git
+git clone https://github.com/yuyoshimuta/motiva.git
 cd motiva
 npm install
 npm run build
-
-# Set your API key
 export OPENAI_API_KEY=sk-...
-# or ANTHROPIC_API_KEY + MOTIVA_LLM_PROVIDER
-
-# Run the local CLI
 npx tsx src/index.ts goal add "Your goal here"
 npx tsx src/index.ts run
 ```
@@ -79,9 +71,14 @@ npx tsx src/index.ts run
 ## Programmatic Usage
 
 ```typescript
-import { CoreLoop, CLIRunner } from "motiva";
+import { CoreLoop, StateManager, GoalNegotiator } from "motiva";
 
-// See docs/ for full API documentation
+// Initialize state
+const stateManager = new StateManager("~/.motiva");
+
+// Run one loop iteration
+const loop = new CoreLoop({ stateManager, /* ...adapters */ });
+await loop.runOnce();
 ```
 
 ---
@@ -135,15 +132,17 @@ import { CoreLoop, CLIRunner } from "motiva";
 │                                                                       │
 │  ┌──── Cross-cutting ────────────────────────────────────────────┐    │
 │  │  Trust & Safety │ Satisficing │ Stall Detection │ Ethics Gate │    │
+│  │  Curiosity Engine │ Character Config │ Embedding / Vector KB  │    │
 │  └───────────────────────────────────────────────────────────────┘    │
 │                                                                       │
 │  ┌──── Infrastructure ───────────────────────────────────────────┐    │
 │  │  Drive System (4 triggers) │ Context Mgmt │ State (JSON)      │    │
+│  │  Daemon/PID │ Event Server │ Notification │ Memory Lifecycle  │    │
 │  └───────────────────────────────────────────────────────────────┘    │
 │                                                                       │
-└───────────────────────────────────┬───────────────────────────────────┘
-                                    │ task delegation
-                                    ↓
+└───────────────────────────────┬───────────────────────────────────────┘
+                                │ task delegation
+                                ↓
 ┌───────────────────────────────────────────────────────────────────────┐
 │                     Execution Layer (existing systems)                │
 │                                                                       │
@@ -160,30 +159,36 @@ import { CoreLoop, CLIRunner } from "motiva";
 
 ### Implementation Layers
 
-Motiva is structured in 7 layers, built bottom-up:
-
 | Layer | Modules | Role |
 |-------|---------|------|
-| 0 | StateManager, AdapterLayer | Persistence and agent abstraction (no dependencies) |
+| 0 | StateManager, AdapterLayer | Persistence and agent abstraction |
 | 1 | GapCalculator, DriveSystem, TrustManager | Gap computation, event scheduling, trust tracking |
 | 2 | ObservationEngine, DriveScorer, SatisficingJudge, StallDetector | Observation, scoring, completion and stall judgment |
 | 3 | LLMClient, EthicsGate, SessionManager, StrategyManager, GoalNegotiator | LLM interface, ethics, session context, goal negotiation |
 | 4 | TaskLifecycle | Full task lifecycle: select → generate → approve → execute → verify |
 | 5 | CoreLoop, ReportingEngine | Orchestration loop, report generation |
 | 6 | CLIRunner | Entry point, subcommand dispatch |
+| 7 | TUI (Ink/React) | Terminal dashboard, approval UI, chat |
+| 8 | KnowledgeManager | Knowledge acquisition and injection |
+| 9 | PortfolioManager | Parallel strategy execution |
+| 10 | DaemonRunner, PIDManager, Logger, EventServer, NotificationDispatcher, MemoryLifecycleManager | Persistent runtime, eventing, notifications |
+| 11 | CuriosityEngine, CharacterConfigManager | Curiosity-driven exploration, ethics enforcement, character configuration |
+| 12 | EmbeddingClient, VectorIndex, KnowledgeGraph, GoalDependencyGraph | Semantic embedding infrastructure, vector search, knowledge graph |
+| 13 | CapabilityDetector, DataSourceAdapter | Autonomous capability acquisition, external data source connections |
+| 14 | GoalTreeManager, CrossGoalPortfolio, LearningPipeline, KnowledgeTransfer | Cross-goal portfolio, learning, knowledge transfer |
 
 ---
 
 ## Core Loop
 
-Each iteration of the core loop moves a goal closer to its thresholds:
+Each iteration moves a goal closer to its thresholds:
 
-1. **Observe** — collect evidence from the real world using 3-layer observation (mechanical checks → independent LLM review → executor self-report). Higher layers override lower ones.
+1. **Observe** — collect evidence using 3-layer observation: mechanical checks → independent LLM review → executor self-report. Higher layers override lower ones.
 2. **Gap calculation** — compute `raw_gap` per dimension, normalize to `[0,1]`, apply confidence weighting (low confidence inflates the gap estimate).
 3. **Drive scoring** — score three drives: dissatisfaction (gap magnitude), deadline urgency (exponential as deadline approaches), opportunity (time-decaying value). The highest score selects the priority dimension.
 4. **Task generation** — an LLM concretizes "what to do": work description, verifiable success criteria, scope boundaries, inherited constraints.
 5. **Execute** — delegate to the selected adapter. Motiva does not intervene during execution; it only monitors status, timeout, and heartbeat.
-6. **Verify** — 3-layer result verification: mechanical checks (tests, files, builds) → independent LLM reviewer → executor self-report. Verdict: `pass / partial / fail`. On failure: keep, discard, or escalate to human.
+6. **Verify** — 3-layer result verification: mechanical checks → independent LLM reviewer → executor self-report. Verdict: `pass / partial / fail`. On failure: keep, discard, or escalate to human.
 
 The loop repeats until: goal completed (SatisficingJudge), stall escalation, max iterations reached, or explicit stop.
 
@@ -192,11 +197,11 @@ The loop repeats until: goal completed (SatisficingJudge), stall escalation, max
 ## Key Design Principles
 
 - **Evidence-based observation** — progress is never inferred from activity. Only verifiable evidence (test results, file diffs, metric readings) can advance a goal dimension. Self-report alone caps progress at 70%.
-- **Satisficing** — Motiva stops when all dimensions cross their thresholds with sufficient confidence. It does not pursue perfection. Goals are declared complete; they are not abandoned.
+- **Satisficing** — Motiva stops when all dimensions cross their thresholds with sufficient confidence. It does not pursue perfection.
 - **Trust balance (asymmetric)** — trust score is per-domain, range `[-100, +100]`. Success: `+3`. Failure: `-10`. Irreversible actions always require human approval, regardless of trust level.
-- **Execution boundary** — Motiva reasons; agents act. The only direct operations Motiva performs are LLM calls and state file read/write. Code execution, data collection, notifications — all delegated.
-- **Ethics gate** — every goal passes through a two-stage ethics check before negotiation begins. Goals that cross legal or ethical lines are rejected outright. Edge cases are flagged for human review.
-- **Stall detection** — four stall indicators (dimension stall, time overrun, consecutive failure, global stall) trigger graduated responses: approach change → strategy pivot → human escalation.
+- **Execution boundary** — Motiva reasons; agents act. The only direct operations Motiva performs are LLM calls and state file read/write.
+- **Ethics gate** — every goal passes through a two-stage ethics check before negotiation begins. Goals that cross legal or ethical lines are rejected outright.
+- **Stall detection** — four stall indicators trigger graduated responses: approach change → strategy pivot → human escalation.
 
 ---
 
@@ -206,9 +211,12 @@ The loop repeats until: goal completed (SatisficingJudge), stall escalation, max
 |---------|-------------|
 | `motiva goal add "<description>"` | Start goal negotiation. Motiva evaluates feasibility, decomposes into measurable dimensions, and registers the agreed goal. |
 | `motiva goal list` | Display all registered goals with current status. |
+| `motiva goal archive <id>` | Archive a completed goal. |
 | `motiva run` | Execute one iteration of the core loop across active goals. |
 | `motiva status` | Show current progress report: goal dimensions, gaps, trust scores, recent activity. |
-| `motiva report` | Display the latest generated report (execution summary or daily). |
+| `motiva report` | Display the latest generated report. |
+| `motiva cleanup` | Archive all completed goals and clean up state. |
+| `motiva datasource add/list/remove` | Manage external data sources for mechanical observation. |
 
 Exit codes: `0` normal completion, `1` error, `2` stall escalation requiring human input.
 
@@ -217,41 +225,36 @@ Exit codes: `0` normal completion, `1` error, `2` stall escalation requiring hum
 ## Development
 
 ```bash
-# Install dependencies
 npm install
-
-# Build (TypeScript → dist/)
-npm run build
-
-# Run all tests (983 tests, 18 files)
-npm test
-
-# Type check without emit
-npm run typecheck
-
-# Run tests in watch mode
-npm run test:watch
+npm run build           # TypeScript → dist/
+npm test                # Run all tests (3308 tests, 91 files)
+npm run typecheck       # Type check without emit
+npm run test:watch      # Watch mode
 ```
 
-State files are written to `~/.motiva/`. Reports are saved to `~/.motiva/reports/`. Ethics logs are at `~/.motiva/ethics/`.
+State files: `~/.motiva/`. Reports: `~/.motiva/reports/`. Ethics logs: `~/.motiva/ethics/`.
 
 ---
 
 ## Project Status
 
-**MVP complete.** All 6 implementation stages are done:
+**Stage 1-14 + Milestone 1-7 complete. 3308 tests passing across 91 test files.**
 
-- Stage 1-2: Type system, state persistence, gap calculation, drive scoring, observation, stall detection, satisficing
-- Stage 3: LLM client, ethics gate, session management, strategy management, goal negotiation
-- Stage 4: Adapter layer (CLI agents, LLM APIs, custom adapters), task lifecycle
-- Stage 5: Core loop, reporting engine
-- Stage 6: CLI runner (5 subcommands)
-
-**983 tests passing across 18 test files.**
-
-**What's next:**
-- Manual end-to-end testing with real goals and live LLM calls
-- Phase 2 features: knowledge acquisition, portfolio management (parallel strategy execution), HTTP event ingestion, daemon/cron process model
+| Stage / Milestone | What was built |
+|---|---|
+| Stage 1-2 | Type system, state persistence, gap calculation, drive scoring, observation, stall detection, satisficing |
+| Stage 3 | LLM client, ethics gate, session management, strategy management, goal negotiation |
+| Stage 4 | Adapter layer (CLI agents, LLM APIs, custom adapters), task lifecycle |
+| Stage 5-6 | Core loop, reporting engine, CLI runner |
+| Stage 7 | TUI — Ink/React terminal dashboard, approval UI, chat interface |
+| Stage 8-10 | Knowledge manager, portfolio manager, daemon runtime, event server, notifications, memory lifecycle |
+| Stage 11 | Curiosity engine, character configuration, enhanced ethics enforcement |
+| Stage 12 | Semantic embedding (OpenAI/Ollama/Mock), vector index (cosine similarity), knowledge graph, goal dependency graph |
+| Stage 13 | Autonomous capability detection and acquisition, external data source adapters (file, HTTP, GitHub Issues) |
+| Stage 14 | Goal tree (recursive decomposition), cross-goal portfolio, strategy templates, learning pipeline, knowledge transfer |
+| Milestone 1 | LLM-powered 3-layer observation with 3-stage fallback (mechanical → LLM → self-report) |
+| Milestone 2-3 | Dogfooding verification — README quality, E2E loop automation, npm publish readiness |
+| Milestone 4-7 | Persistent runtime Phase 2, semantic knowledge base, observation accuracy improvements, task selection enhancements |
 
 ---
 

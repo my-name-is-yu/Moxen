@@ -21,7 +21,9 @@ import type { CapabilityAcquisitionTask } from "./types/capability.js";
 // ─── Adapter types (re-exported from adapter-layer) ───
 
 import type { AgentTask, AgentResult, IAdapter } from "./adapter-layer.js";
+import { AdapterRegistry } from "./adapter-layer.js";
 export type { AgentTask, AgentResult, IAdapter };
+export { AdapterRegistry };
 
 const DEBUG = process.env.MOTIVA_DEBUG === "true";
 
@@ -97,6 +99,7 @@ export class TaskLifecycle {
   private readonly ethicsGate?: EthicsGate;
   private readonly capabilityDetector?: CapabilityDetector;
   private readonly logger?: Logger;
+  private readonly adapterRegistry?: AdapterRegistry;
   private onTaskComplete?: (strategyId: string) => void;
 
   constructor(
@@ -111,6 +114,8 @@ export class TaskLifecycle {
       ethicsGate?: EthicsGate;
       capabilityDetector?: CapabilityDetector;
       logger?: Logger;
+      /** Optional adapter registry for L1 mechanical verification command execution */
+      adapterRegistry?: AdapterRegistry;
     }
   ) {
     this.stateManager = stateManager;
@@ -123,6 +128,7 @@ export class TaskLifecycle {
     this.ethicsGate = options?.ethicsGate;
     this.capabilityDetector = options?.capabilityDetector;
     this.logger = options?.logger;
+    this.adapterRegistry = options?.adapterRegistry;
   }
 
   // ─── setOnTaskComplete ───
@@ -1064,13 +1070,13 @@ Respond with only the JSON object inside a markdown code block.`;
     // Mechanical prefixes that indicate a command can be run directly
     const mechanicalPrefixes = ["npm", "npx", "pytest", "sh", "bash", "node", "make", "cargo", "go ", "gh "];
 
-    // Check if any success criterion has a mechanically-verifiable verification_method
-    const hasMechanicalCriteria = task.success_criteria.some((c) => {
+    // Find the first success criterion with a mechanically-verifiable verification_method
+    const mechanicalCriterion = task.success_criteria.find((c) => {
       const method = c.verification_method.toLowerCase().trim();
       return mechanicalPrefixes.some((prefix) => method.startsWith(prefix));
     });
 
-    if (!hasMechanicalCriteria) {
+    if (!mechanicalCriterion) {
       return {
         applicable: false,
         passed: false,
@@ -1078,13 +1084,74 @@ Respond with only the JSON object inside a markdown code block.`;
       };
     }
 
-    // For MVP, L1 is applicable but we cannot run the command without an adapter.
-    // In Phase 2, this would invoke the adapter to execute the verification command.
-    return {
-      applicable: true,
-      passed: true,
-      description: "Mechanical verification criteria detected (MVP: assumed pass)",
+    // If no adapter registry is available, fall back to assumed pass (backward compat)
+    if (!this.adapterRegistry) {
+      return {
+        applicable: true,
+        passed: true,
+        description: "Mechanical verification criteria detected (no adapter: assumed pass)",
+      };
+    }
+
+    // Select the first available adapter from the registry for command execution
+    const availableAdapters = this.adapterRegistry.listAdapters();
+    if (availableAdapters.length === 0) {
+      return {
+        applicable: true,
+        passed: true,
+        description: "Mechanical verification criteria detected (no adapters registered: assumed pass)",
+      };
+    }
+
+    const adapterType = availableAdapters[0]!;
+    let adapter: IAdapter;
+    try {
+      adapter = this.adapterRegistry.getAdapter(adapterType);
+    } catch {
+      return {
+        applicable: true,
+        passed: true,
+        description: "Mechanical verification criteria detected (adapter lookup failed: assumed pass)",
+      };
+    }
+
+    // Execute the verification command via the adapter
+    const verificationCommand = mechanicalCriterion.verification_method.trim();
+    const verificationTimeoutMs = 30_000; // 30 seconds default for L1 mechanical checks
+
+    const agentTask: AgentTask = {
+      prompt: verificationCommand,
+      timeout_ms: verificationTimeoutMs,
+      adapter_type: adapterType,
     };
+
+    let result: AgentResult;
+    try {
+      result = await adapter.execute(agentTask);
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.logger?.error("runMechanicalVerification: adapter.execute() threw", { error: errMsg });
+      return {
+        applicable: true,
+        passed: false,
+        description: `Mechanical verification command threw: ${errMsg}`,
+      };
+    }
+
+    if (result.stopped_reason === "timeout") {
+      return {
+        applicable: true,
+        passed: false,
+        description: `Mechanical verification timed out after ${verificationTimeoutMs}ms (command: ${verificationCommand})`,
+      };
+    }
+
+    const passed = result.exit_code === 0 && result.success;
+    const description = passed
+      ? `Mechanical verification passed (exit 0): ${verificationCommand}`
+      : `Mechanical verification failed (exit ${result.exit_code ?? "null"}): ${verificationCommand}${result.error ? ` — ${result.error}` : ""}`;
+
+    return { applicable: true, passed, description };
   }
 
   private async runLLMReview(
