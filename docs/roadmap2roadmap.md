@@ -31,11 +31,11 @@
 
 ---
 
-## Phase R1: CoreLoopを「動く」状態にする
+## Phase R1: CoreLoopを「動く」状態にする ✅ 完了
 
 **目的**: observe → gap → score → task → execute → verify サイクルが最低1回は完走すること。
 
-### R1-1: Satisficing短絡の修正
+### R1-1: Satisficing短絡の修正 ✅ 完了
 
 **問題**: `core-loop.ts` L620-638。Step 5 Completion CheckでStep 7 Task Cycleより前に `return` している。
 
@@ -65,7 +65,7 @@ Step 8: Completion Check（タスク実行後に判定）
 
 **依存**: なし（最優先で着手）
 
-### R1-2: ループの最低1回実行保証
+### R1-2: ループの最低1回実行保証 ✅ 完了
 
 **問題**: 初回ループでも即座に完了判定される可能性がある（ゴール作成時に初期値が閾値以上の場合）。
 
@@ -79,7 +79,7 @@ Step 8: Completion Check（タスク実行後に判定）
 
 **依存**: R1-1
 
-### R1-3: 完了→アーカイブの即時実行を防止 🔄 部分実装済み
+### R1-3: 完了→アーカイブの即時実行を防止 ✅ 完了
 
 **問題**: `core-loop.ts` L397付近。`finalStatus === "completed"` の直後に `archiveGoal()` が呼ばれ、ゴール状態が消える。
 
@@ -98,7 +98,7 @@ Step 8: Completion Check（タスク実行後に判定）
 
 **修正状態**:
 - 自動アーカイブ機能は実装済み（CoreLoopで `archiveGoal()` 呼び出し）
-- **未完了**: アーカイブフォールバック (`loadGoal()` が archive/ も探す) — bug #6
+- ✅ アーカイブフォールバック (`loadGoal()` が archive/ も探す) — 実装完了
 
 ### R1 検証方法
 
@@ -120,7 +120,7 @@ motiva run --goal <id> --yes --max-iterations 3
 
 **依存**: R1が完了していなくても並行着手可能（観測の改善は独立）
 
-### R2-1: contextProviderのゴール認識型ファイル選択 🔄 部分実装済み
+### R2-1: contextProviderのゴール認識型ファイル選択 ✅ 完了
 
 **問題**: `observation-engine.ts` L67-78。`contextProvider` はDI引数だが、CLI起動時（`cli-runner.ts`）で注入される実装が貧弱（5ファイル固定 x 2000文字切り詰め）か、そもそも未注入。
 
@@ -140,11 +140,12 @@ motiva run --goal <id> --yes --max-iterations 3
 **複雑度**: M
 
 **修正状態**:
-- commit eab1bdf + 0bcc63d で contextProvider の DI 注入は実装済み
-- しかし現在の実装は基本的（5ファイル固定 × 2000文字）
-- **改善が STILL NEEDED**: ゴール・次元認識型のセマンティック選択はまだ（R2-2と関連）
+- contextProviderシグネチャを `(goalId: string, dimensionName: string) => Promise<string>` に拡張
+- `src/context-providers/workspace-context.ts` 新規作成: キーワード抽出 → ファイル名/内容マッチ → 上位5ファイル×4000文字
+- `src/cli-runner.ts` でゴール認識型provider注入
+- テスト: `tests/observation-engine-context.test.ts` 9テスト通過
 
-### R2-2: observeWithLLMへのファイル内容注入 🔄 部分実装済み
+### R2-2: observeWithLLMへのファイル内容注入 ✅ 完了
 
 **問題**: `observation-engine.ts` L530付近。`observeWithLLM()` のプロンプトにワークスペース内容が含まれない（bug analysis #4で確認済み）。
 
@@ -174,9 +175,10 @@ motiva run --goal <id> --yes --max-iterations 3
 **複雑度**: M
 
 **修正状態**:
-- contextProvider の DI 注入は済み（commit 0bcc63d）
-- observeWithLLM() はワークスペース状態をプロンプトに含める基本実装あり
-- **改善が STILL NEEDED**: コンテキスト品質向上（R2-1の精緻化と連動）
+- observeWithLLMプロンプトに前回スコア（`前回の観測結果: スコア X.XX`）追加
+- コンテキストセクションにゴール認識型ワークスペース内容を注入
+- プロンプト末尾を「実際のファイル内容に基づいて評価」に改善
+- テスト: previous score検証含む9テスト通過
 
 ### R2-3: observeCount切り詰めバグの修正 ✅ 修正済み
 
@@ -207,13 +209,13 @@ motiva run --goal <id> --yes --max-iterations 1
 
 ---
 
-## Phase R3: タスク生成→実行→検証の一気通貫
+## Phase R3: タスク生成→実行→検証の一気通貫 ✅ 完了
 
 **目的**: Motivaが自律的に1つの具体的改善を完了すること。
 
 **依存**: R1（ループが動くこと）、R2（観測が現実を反映すること）
 
-### R3-1: タスク生成プロンプトの検証と改善
+### R3-1: タスク生成プロンプトの検証と改善 ✅ 完了
 
 **問題**: `task-lifecycle.ts` L911-1003付近。`buildTaskGenerationPrompt()` が生成するプロンプトの品質が未検証。生成されたタスクが「具体的で実行可能か」の確認がない。
 
@@ -236,7 +238,7 @@ motiva run --goal <id> --yes --max-iterations 1
 
 **複雑度**: M
 
-### R3-2: アダプタ実行の実証テスト
+### R3-2: アダプタ実行の実証テスト ✅ 完了
 
 **問題**: Claude Code CLIアダプタ（`src/adapters/claude-code-cli.ts`）とOpenAI Codexアダプタ（`src/adapters/openai-codex.ts`）が実際のタスクを実行できるか未検証。
 
@@ -252,7 +254,7 @@ motiva run --goal <id> --yes --max-iterations 1
 
 **複雑度**: M
 
-### R3-3: タスク実行後の観測フィードバック検証
+### R3-3: タスク実行後の観測フィードバック検証 ✅ 完了
 
 **問題**: タスク実行後に再観測しても、観測結果が変わらない可能性がある（R2のLLM観測改善が前提）。
 
@@ -267,7 +269,7 @@ motiva run --goal <id> --yes --max-iterations 1
 
 **複雑度**: L
 
-### R3-4: ゴール交渉の次元品質改善 ✅ 部分修正済み
+### R3-4: ゴール交渉の次元品質改善 ✅ 完了
 
 **問題**: `goal-negotiator.ts` L61-66。DataSource次元名の強制が品質次元を殺す（bug analysis #3）。
 
@@ -286,7 +288,7 @@ motiva run --goal <id> --yes --max-iterations 1
 **修正内容**:
 - commit eab1bdf: 閾値を 0.3 → 0.6 に引き上げ
 - commit 1bcb8db: プロンプト軟化（CRITICAL CONSTRAINTを軽減）、min-type例を追加
-- **未完了**: 警告メッセージのバリデーション実装はまだ
+- ✅ 警告メッセージのバリデーション実装完了（全次元がDataSource次元にリマップされた場合にconsole.warn）
 
 ### R3 検証方法
 

@@ -66,7 +66,7 @@ describe("OpenAICodexCLIAdapter", () => {
   // ─── spawn args ───
 
   describe("spawn arguments", () => {
-    it("spawns codex with 'exec --full-auto PROMPT' by default", async () => {
+    it("spawns codex with 'exec -s danger-full-access PROMPT' by default", async () => {
       const adapter = new OpenAICodexCLIAdapter();
       const child = makeFakeChild();
 
@@ -77,7 +77,7 @@ describe("OpenAICodexCLIAdapter", () => {
       expect(mockSpawn).toHaveBeenCalledTimes(1);
       const [cliPath, spawnArgs] = mockSpawn.mock.calls[0] as [string, string[]];
       expect(cliPath).toBe("codex");
-      expect(spawnArgs).toEqual(["exec", "--full-auto", "run tests"]);
+      expect(spawnArgs).toEqual(["exec", "-s", "danger-full-access", "run tests"]);
     });
 
     it("uses custom cliPath when configured", async () => {
@@ -101,10 +101,10 @@ describe("OpenAICodexCLIAdapter", () => {
       await executePromise;
 
       const [, spawnArgs] = mockSpawn.mock.calls[0] as [string, string[]];
-      expect(spawnArgs).toContain("--model");
+      expect(spawnArgs).toContain("-m");
       expect(spawnArgs).toContain("o4-mini");
-      // Verify order: --model comes before the prompt
-      const modelIdx = spawnArgs.indexOf("--model");
+      // Verify order: -m comes before the prompt
+      const modelIdx = spawnArgs.indexOf("-m");
       const promptIdx = spawnArgs.indexOf("do task");
       expect(modelIdx).toBeLessThan(promptIdx);
     });
@@ -121,8 +121,8 @@ describe("OpenAICodexCLIAdapter", () => {
       expect(spawnArgs).not.toContain("--model");
     });
 
-    it("omits --full-auto flag when fullAuto is false", async () => {
-      const adapter = new OpenAICodexCLIAdapter({ fullAuto: false });
+    it("omits -s flag when sandboxPolicy is null", async () => {
+      const adapter = new OpenAICodexCLIAdapter({ sandboxPolicy: null });
       const child = makeFakeChild();
 
       const executePromise = adapter.execute(makeTask({ prompt: "hi" }));
@@ -130,7 +130,7 @@ describe("OpenAICodexCLIAdapter", () => {
       await executePromise;
 
       const [, spawnArgs] = mockSpawn.mock.calls[0] as [string, string[]];
-      expect(spawnArgs).not.toContain("--full-auto");
+      expect(spawnArgs).not.toContain("-s");
       expect(spawnArgs).toEqual(["exec", "hi"]);
     });
   });

@@ -2,17 +2,16 @@
 //
 // IAdapter implementation that spawns the `codex` CLI process.
 // The task prompt is passed as a positional argument to the `exec` subcommand.
-// Uses --full-auto by default for non-interactive execution.
+// Uses -s danger-full-access by default for non-interactive execution.
 //
-// Usage: codex exec [--full-auto] [--model <model>] "PROMPT"
+// Usage: codex exec [-s danger-full-access] [-m <model>] "PROMPT"
 //
-// TODO: verify exact CLI flags against the installed codex CLI version.
-// Current assumptions based on OpenAI Codex CLI docs (as of 2026-03):
+// Verified against codex-cli 0.114.0:
 //   - `exec` subcommand runs a single prompt non-interactively
-//   - `--full-auto` enables full-auto approval mode (no human-in-the-loop prompts)
-//   - `--model <model>` selects the model (e.g. "o4-mini", "o3")
+//   - `-s danger-full-access` sets sandbox policy to allow full disk/command access
+//   - `-m <model>` selects the model (e.g. "o4-mini", "o3")
 //   - prompt is delivered as a positional argument
-// If the CLI signature changes, update the spawnArgs array below.
+//   - NOTE: --full-auto does NOT exist in this version; use sandbox policy instead
 
 import { spawn } from "node:child_process";
 import type { IAdapter, AgentTask, AgentResult } from "../adapter-layer.js";
@@ -20,9 +19,13 @@ import type { IAdapter, AgentTask, AgentResult } from "../adapter-layer.js";
 export interface OpenAICodexCLIAdapterConfig {
   /** The executable name / path for the codex CLI. Default: "codex" */
   cliPath?: string;
-  /** Pass --full-auto flag to skip interactive approval prompts. Default: true */
-  fullAuto?: boolean;
-  /** If set, pass --model <model> to the CLI. */
+  /**
+   * Sandbox policy passed via -s flag. Default: "danger-full-access" for
+   * non-interactive execution. Use "workspace-write" for a safer sandbox.
+   * Set to null to omit the flag entirely.
+   */
+  sandboxPolicy?: string | null;
+  /** If set, pass -m <model> to the CLI. */
   model?: string;
 }
 
@@ -31,12 +34,13 @@ export class OpenAICodexCLIAdapter implements IAdapter {
   readonly capabilities = ["execute_code", "read_files", "write_files", "run_commands"] as const;
 
   private readonly cliPath: string;
-  private readonly fullAuto: boolean;
+  private readonly sandboxPolicy: string | null;
   private readonly model: string | undefined;
 
   constructor(config: OpenAICodexCLIAdapterConfig = {}) {
     this.cliPath = config.cliPath ?? "codex";
-    this.fullAuto = config.fullAuto ?? true;
+    this.sandboxPolicy =
+      config.sandboxPolicy !== undefined ? config.sandboxPolicy : "danger-full-access";
     this.model = config.model;
   }
 
@@ -44,18 +48,19 @@ export class OpenAICodexCLIAdapter implements IAdapter {
     const startedAt = Date.now();
 
     return new Promise<AgentResult>((resolve) => {
-      // Build argument list: exec [--full-auto] [--model <model>] "<prompt>"
+      // Build argument list: exec [-s <policy>] [-m <model>] "<prompt>"
       const spawnArgs: string[] = ["exec"];
 
-      if (this.fullAuto) {
-        spawnArgs.push("--full-auto");
+      if (this.sandboxPolicy) {
+        spawnArgs.push("-s", this.sandboxPolicy);
       }
 
       if (this.model) {
-        spawnArgs.push("--model", this.model);
+        spawnArgs.push("-m", this.model);
       }
 
       // Prompt is passed as a positional argument to the exec subcommand.
+      // codex exec [-s <policy>] [-m <model>] "<prompt>"
       spawnArgs.push(task.prompt);
 
       const child = spawn(this.cliPath, spawnArgs, {

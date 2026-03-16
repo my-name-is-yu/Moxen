@@ -27,6 +27,7 @@ import type { IDataSourceAdapter } from "./data-source-adapter.js";
 import { FileDataSourceAdapter, HttpApiDataSourceAdapter } from "./data-source-adapter.js";
 import { GitHubIssueDataSourceAdapter } from "./adapters/github-issue-datasource.js";
 import { FileExistenceDataSourceAdapter } from "./adapters/file-existence-datasource.js";
+import { createWorkspaceContextProvider } from "./context-providers/workspace-context.js";
 import type { ILLMClient } from "./llm-client.js";
 import { buildLLMClient, buildAdapterRegistry } from "./provider-factory.js";
 import { loadProviderConfig, saveProviderConfig } from "./provider-config.js";
@@ -129,22 +130,15 @@ export class CLIRunner {
       }
     } catch { /* ignore errors */ }
 
-    const contextProvider = async (): Promise<string> => {
-      const cwd = process.cwd();
-      const candidates = ['README.md', 'package.json', 'CLAUDE.md', 'tsconfig.json', 'docs/status.md'];
-      const parts: string[] = [`# Workspace: ${cwd}`];
-      try {
-        const entries = fs.readdirSync(cwd);
-        parts.push(`## Directory listing\n${entries.join(', ')}`);
-      } catch { /* skip */ }
-      for (const rel of candidates) {
+    const contextProvider = createWorkspaceContextProvider(
+      { workDir: process.cwd() },
+      (goalId: string) => {
         try {
-          const content = fs.readFileSync(path.join(cwd, rel), 'utf-8');
-          parts.push(`## ${rel}\n\`\`\`\n${content.slice(0, 2000)}\n\`\`\``);
-        } catch { /* skip missing */ }
+          const goal = stateManager.loadGoal(goalId);
+          return goal?.description;
+        } catch { return undefined; }
       }
-      return parts.join('\n\n');
-    };
+    );
 
     const observationEngine = new ObservationEngine(stateManager, dataSources, llmClient, contextProvider);
     const stallDetector = new StallDetector(stateManager, characterConfig);
@@ -204,6 +198,7 @@ export class CLIRunner {
       stateAggregator,
       treeLoopOrchestrator,
       logger,
+      contextProvider,
     }, config);
 
     const goalNegotiator = new GoalNegotiator(
@@ -343,7 +338,7 @@ export class CLIRunner {
 
   private async cmdGoalAdd(
     description: string,
-    opts: { deadline?: string; constraints?: string[] }
+    opts: { deadline?: string; constraints?: string[]; yes?: boolean }
   ): Promise<number> {
     const apiKey = this.getApiKey();
     const providerConfig2 = loadProviderConfig();
@@ -393,17 +388,23 @@ export class CLIRunner {
           console.log(`Reasoning: ${response.counter_proposal.reasoning}`);
         }
 
-        const accepted = await new Promise<boolean>((resolve) => {
-          const rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout,
+        let accepted: boolean;
+        if (opts.yes) {
+          console.log("\n--- Auto-accepted counter-proposal (--yes) ---");
+          accepted = true;
+        } else {
+          accepted = await new Promise<boolean>((resolve) => {
+            const rl = readline.createInterface({
+              input: process.stdin,
+              output: process.stdout,
+            });
+            process.stdout.write("\nAccept this counter-proposal and register the goal? [y/N] ");
+            rl.once("line", (answer) => {
+              rl?.close();
+              resolve(answer.trim().toLowerCase() === "y");
+            });
           });
-          process.stdout.write("\nAccept this counter-proposal and register the goal? [y/N] ");
-          rl.once("line", (answer) => {
-            rl?.close();
-            resolve(answer.trim().toLowerCase() === "y");
-          });
-        });
+        }
 
         if (!accepted) {
           // Goal was saved inside negotiate(); remove it since user declined
@@ -415,6 +416,9 @@ export class CLIRunner {
 
       // For accept/flag_as_ambitious, goal is already saved inside negotiate().
       // No need to call saveGoal again.
+
+      // Auto-register FileExistenceDataSource for file_existence dimensions (best-effort).
+      this.autoRegisterFileExistenceDataSources(goal.dimensions, goal.description);
 
       console.log(`Goal registered successfully!`);
       console.log(`Goal ID:    ${goal.id}`);
@@ -813,6 +817,72 @@ export class CLIRunner {
     console.log("# Add these to your crontab with: crontab -e");
     for (const goalId of goalIds) {
       console.log(DaemonRunner.generateCronEntry(goalId, intervalMinutes));
+    }
+  }
+
+  // ─── Auto DataSource Registration ───
+
+  private autoRegisterFileExistenceDataSources(
+    dimensions: Array<{ name: string }>,
+    goalDescription: string
+  ): void {
+    try {
+      const fileExistenceDims = dimensions.filter((d) =>
+        /_exists$|_file$|file_existence/.test(d.name)
+      );
+      if (fileExistenceDims.length === 0) return;
+
+      const filePathPattern = /\b([\w.\-/]+\.\w{1,10})\b/g;
+      const candidateFiles: string[] = [];
+      let m: RegExpExecArray | null;
+      while ((m = filePathPattern.exec(goalDescription)) !== null) {
+        candidateFiles.push(m[1]);
+      }
+
+      const dimensionMapping: Record<string, string> = {};
+      for (const dim of fileExistenceDims) {
+        const dimBase = dim.name
+          .replace(/_exists$/, "")
+          .replace(/_file$/, "")
+          .replace(/_/g, "")
+          .toLowerCase();
+        const matched = candidateFiles.find((f) => {
+          const fBase = path.basename(f).replace(/[._-]/g, "").toLowerCase();
+          return fBase.includes(dimBase) || dimBase.includes(fBase);
+        });
+        if (matched) {
+          dimensionMapping[dim.name] = matched;
+        } else if (candidateFiles.length === 1) {
+          dimensionMapping[dim.name] = candidateFiles[0];
+        }
+      }
+
+      if (Object.keys(dimensionMapping).length === 0) return;
+
+      const datasourcesDir = path.join(this.stateManager.getBaseDir(), "datasources");
+      if (!fs.existsSync(datasourcesDir)) {
+        fs.mkdirSync(datasourcesDir, { recursive: true });
+      }
+
+      const id = `ds_auto_${Date.now()}`;
+      const config = {
+        id,
+        name: `auto:file_existence (${Object.values(dimensionMapping).join(", ")})`,
+        type: "file_existence",
+        connection: { path: process.cwd() },
+        dimension_mapping: dimensionMapping,
+        enabled: true,
+        created_at: new Date().toISOString(),
+      };
+
+      const configPath = path.join(datasourcesDir, `${id}.json`);
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2), "utf-8");
+
+      console.log(
+        `[auto] Registered FileExistenceDataSource for: ${Object.keys(dimensionMapping).join(", ")}`
+      );
+    } catch {
+      // Best-effort — never block goal registration
     }
   }
 
@@ -1302,24 +1372,26 @@ Options:
           return 1;
         }
 
-        let values: { deadline?: string | undefined; constraint?: string[] | undefined };
+        let values: { deadline?: string | undefined; constraint?: string[] | undefined; yes?: boolean | undefined };
         try {
           ({ values } = parseArgs({
             args: argv.slice(3),
             options: {
               deadline: { type: "string" },
               constraint: { type: "string", multiple: true },
+              yes: { type: "boolean", short: "y" },
             },
             strict: false,
-          }) as { values: { deadline?: string; constraint?: string[] } });
+          }) as { values: { deadline?: string; constraint?: string[]; yes?: boolean } });
         } catch {
           values = {};
         }
 
         const deadline = values.deadline;
         const constraints = values.constraint ?? [];
+        const yes = values.yes ?? false;
 
-        return await this.cmdGoalAdd(description, { deadline, constraints });
+        return await this.cmdGoalAdd(description, { deadline, constraints, yes });
       }
 
       if (goalSubcommand === "list") {

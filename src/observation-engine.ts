@@ -64,13 +64,13 @@ export class ObservationEngine {
   private readonly stateManager: StateManager;
   private readonly dataSources: IDataSourceAdapter[];
   private readonly llmClient?: ILLMClient;
-  private readonly contextProvider?: () => Promise<string>;
+  private readonly contextProvider?: (goalId: string, dimensionName: string) => Promise<string>;
 
   constructor(
     stateManager: StateManager,
     dataSources: IDataSourceAdapter[] = [],
     llmClient?: ILLMClient,
-    contextProvider?: () => Promise<string>
+    contextProvider?: (goalId: string, dimensionName: string) => Promise<string>
   ) {
     this.stateManager = stateManager;
     this.dataSources = dataSources;
@@ -324,28 +324,33 @@ export class ObservationEngine {
     // When methods is empty (e.g. CoreLoop passes []), observe all dimensions.
     const observeCount = methods.length > 0 ? methods.length : goal.dimensions.length;
 
-    // Workspace context for LLM observations — fetched lazily on first LLM call.
-    // This avoids calling contextProvider when all dimensions are covered by DataSources.
-    let workspaceContext: string | undefined;
-    let workspaceContextFetched = false;
+    // Workspace context for LLM observations — fetched lazily per dimension, cached within
+    // this observe() call to avoid re-reading the same files for multiple dimensions.
+    const contextCache = new Map<string, string>();
+    let warnedNoProvider = false;
 
-    const fetchWorkspaceContext = async (): Promise<string | undefined> => {
-      if (workspaceContextFetched) return workspaceContext;
-      workspaceContextFetched = true;
+    const fetchWorkspaceContext = async (gId: string, dimensionName: string): Promise<string | undefined> => {
+      const cacheKey = `${gId}::${dimensionName}`;
+      if (contextCache.has(cacheKey)) return contextCache.get(cacheKey);
       if (this.contextProvider) {
         try {
-          workspaceContext = await this.contextProvider();
+          const ctx = await this.contextProvider(gId, dimensionName);
+          contextCache.set(cacheKey, ctx);
+          return ctx;
         } catch (err) {
           console.warn(
             `[ObservationEngine] contextProvider failed: ${err instanceof Error ? err.message : String(err)}. LLM observation will proceed without workspace context.`
           );
         }
       } else {
-        console.warn(
-          `[ObservationEngine] No contextProvider configured. LLM observation will proceed without workspace context (scores may be unreliable).`
-        );
+        if (!warnedNoProvider) {
+          warnedNoProvider = true;
+          console.warn(
+            `[ObservationEngine] No contextProvider configured. LLM observation will proceed without workspace context (scores may be unreliable).`
+          );
+        }
       }
-      return workspaceContext;
+      return undefined;
     };
 
     for (let idx = 0; idx < observeCount; idx++) {
@@ -367,7 +372,7 @@ export class ObservationEngine {
 
       // 2. Try LLM if available
       if (this.llmClient) {
-        const ctx = await fetchWorkspaceContext();
+        const ctx = await fetchWorkspaceContext(goalId, dim.name);
         try {
           await this.observeWithLLM(
             goalId,
@@ -375,7 +380,8 @@ export class ObservationEngine {
             goal.description,
             dim.label ?? dim.name,
             JSON.stringify(dim.threshold),
-            ctx
+            ctx,
+            typeof dim.current_value === "number" ? dim.current_value : null
           );
           continue;
         } catch (err) {
@@ -533,7 +539,8 @@ export class ObservationEngine {
     goalDescription: string,
     dimensionLabel: string,
     thresholdDescription: string,
-    workspaceContext?: string
+    workspaceContext?: string,
+    previousScore?: number | null
   ): Promise<ObservationLogEntry> {
     if (!this.llmClient) {
       throw new Error("observeWithLLM: llmClient is not configured");
@@ -543,9 +550,25 @@ export class ObservationEngine {
       `[ObservationEngine] LLM observation for dimension "${dimensionLabel}" (goal: ${goalId})`
     );
 
-    const contextSection = workspaceContext
+    const hasContext = !!workspaceContext && workspaceContext.trim().length > 0;
+
+    const contextSection = hasContext
       ? `\n=== Current Workspace State ===\n${workspaceContext}\n=== End Workspace State ===\n`
       : "";
+
+    // When no relevant content was found in the workspace, the LLM must treat
+    // absence of evidence as evidence of absence (score = 0.0), not as
+    // "unknown" (which can cause the LLM to default to a high score).
+    const absentContentWarning = !hasContext
+      ? `\nWARNING: No relevant files or content were found in the workspace for this dimension. ` +
+        `If the target artifact does not exist yet, the score MUST be 0.0. ` +
+        `Do NOT assume the artifact exists or invent a score — if you cannot observe it, score it 0.0.\n`
+      : "";
+
+    const previousScoreSection =
+      previousScore !== undefined && previousScore !== null
+        ? `\n前回の観測結果: スコア ${previousScore.toFixed(2)}\n`
+        : "";
 
     const prompt =
       `以下のゴールの次元を0.0〜1.0で評価してください。\n\n` +
@@ -553,7 +576,9 @@ export class ObservationEngine {
       `評価次元: ${dimensionLabel}\n` +
       `目標値: ${thresholdDescription}\n` +
       contextSection +
-      `\n現在の状態を考慮して、この次元の達成度を0.0（未達成）〜1.0（完全達成）で評価してください。\n\n` +
+      absentContentWarning +
+      previousScoreSection +
+      `\n上記の実際のファイル内容に基づいて評価してください。ワークスペース状態が提供されていない場合、対象物が存在しないとみなし0.0を返してください。\n\n` +
       `回答はJSON形式で: {"score": 0.0〜1.0, "reason": "評価理由"}`;
 
     const response = await this.llmClient.sendMessage([

@@ -238,7 +238,7 @@ function makeStallReport(overrides: Partial<StallReport> = {}): StallReport {
 
 function createMockAdapter(): IAdapter {
   return {
-    adapterType: "claude_api",
+    adapterType: "openai_codex_cli",
     execute: vi.fn().mockResolvedValue({
       success: true,
       output: "Task completed",
@@ -360,7 +360,7 @@ function createMockDeps(tmpDir: string): {
   const adapterRegistry = {
     getAdapter: vi.fn().mockReturnValue(adapter),
     register: vi.fn(),
-    listAdapters: vi.fn().mockReturnValue(["claude_api"]),
+    listAdapters: vi.fn().mockReturnValue(["openai_codex_cli"]),
   };
 
   const deps: CoreLoopDeps = {
@@ -1381,14 +1381,14 @@ describe("CoreLoop", () => {
       expect(mocks.adapterRegistry.getAdapter).toHaveBeenCalledWith("test_adapter");
     });
 
-    it("uses default adapter type (claude_api)", async () => {
+    it("uses default adapter type (openai_codex_cli)", async () => {
       const { deps, mocks } = createMockDeps(tmpDir);
       mocks.stateManager.saveGoal(makeGoal());
 
       const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
       await loop.runOneIteration("goal-1", 0);
 
-      expect(mocks.adapterRegistry.getAdapter).toHaveBeenCalledWith("claude_api");
+      expect(mocks.adapterRegistry.getAdapter).toHaveBeenCalledWith("openai_codex_cli");
     });
 
     it("passes adapter to taskLifecycle.runTaskCycle", async () => {
@@ -1404,7 +1404,8 @@ describe("CoreLoop", () => {
         expect.any(Object), // driveContext
         mocks.adapter,
         undefined, // knowledgeContext (no knowledge manager configured)
-        undefined  // existingTasks (adapter has no listExistingTasks)
+        undefined, // existingTasks (adapter has no listExistingTasks)
+        undefined  // workspaceContext
       );
     });
   });

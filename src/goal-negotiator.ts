@@ -448,6 +448,16 @@ export class GoalNegotiator {
           }
         }
       }
+
+      // R3-4: Warn if all dimensions were remapped to DataSource dimensions
+      const allRemapped = dimensions.length > 0 && dimensions.every(dim => allDsNames.includes(dim.name));
+      if (allRemapped) {
+        console.warn(
+          "[GoalNegotiator] Warning: all dimensions were remapped to DataSource dimensions. " +
+          "Quality-specific dimensions may be missing. Consider adding dimensions that directly " +
+          "measure the goal's quality aspects."
+        );
+      }
     }
 
     log.step2_decomposition = {

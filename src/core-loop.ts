@@ -98,7 +98,7 @@ const DEFAULT_CONFIG: Required<LoopConfig> = {
   maxIterations: 100,
   maxConsecutiveErrors: 3,
   delayBetweenLoopsMs: 1000,
-  adapterType: "claude_api",
+  adapterType: "openai_codex_cli",
   treeMode: false,
   multiGoalMode: false,
   goalIds: [],
@@ -162,6 +162,8 @@ export interface CoreLoopDeps {
   knowledgeTransfer?: KnowledgeTransfer;
   memoryLifecycleManager?: MemoryLifecycleManager;
   logger?: Logger;
+  /** Optional context provider for workspace-aware task generation */
+  contextProvider?: (goalId: string, dimensionName: string) => Promise<string>;
 }
 
 // ─── Helpers ───
@@ -904,6 +906,17 @@ export class CoreLoop {
         }
       }
 
+      // ─── 7d. Collect workspace context for task generation ───
+      let workspaceContext: string | undefined;
+      if (this.deps.contextProvider) {
+        try {
+          const topDimension = driveScores[0]?.dimension_name ?? goal.dimensions[0]?.name ?? "";
+          workspaceContext = await this.deps.contextProvider(goalId, topDimension);
+        } catch {
+          // Non-fatal: proceed without workspace context
+        }
+      }
+
       this.logger?.debug("CoreLoop: running task cycle", { adapter: adapter.adapterType, goalId });
       const taskResult = await this.deps.taskLifecycle.runTaskCycle(
         goalId,
@@ -911,7 +924,8 @@ export class CoreLoop {
         driveContext,
         adapter,
         knowledgeContext,
-        existingTasks
+        existingTasks,
+        workspaceContext
       );
       this.logger?.info("CoreLoop: task cycle result", { action: taskResult.action, taskId: taskResult.task.id });
       result.taskResult = taskResult;

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
@@ -2087,6 +2087,123 @@ describe("GoalNegotiator CharacterConfig integration", () => {
       expect(result.response).toBeDefined();
       // No capability check log since it failed (null or undefined, not populated)
       expect(result.log.step4_capability_check ?? null).toBeNull();
+    });
+  });
+
+  // ─── R3-4: All-DataSource-dimension remapping warning ───
+
+  describe("R3-4: all-DataSource-dimension remapping warning", () => {
+    function makeCapturingLLM(dimensionsJson: string) {
+      let callCount = 0;
+      return {
+        async sendMessage(_messages: Array<{ role: string; content: string }>, _options?: unknown): Promise<{ content: string; usage: { input_tokens: number; output_tokens: number }; stop_reason: string }> {
+          callCount++;
+          const responses: Record<number, string> = {
+            1: PASS_VERDICT,
+            2: dimensionsJson,
+            3: FEASIBILITY_REALISTIC,
+            4: RESPONSE_MESSAGE_ACCEPT,
+          };
+          const content = responses[callCount] ?? RESPONSE_MESSAGE_ACCEPT;
+          return { content, usage: { input_tokens: 10, output_tokens: content.length }, stop_reason: "end_turn" };
+        },
+        parseJSON<T>(content: string, schema: { parse: (v: unknown) => T }): T {
+          return schema.parse(JSON.parse(content.trim()));
+        },
+      };
+    }
+
+    it("warns when ALL dimensions match DataSource dimensions", async () => {
+      // DataSource exposes "open_issue_count"; LLM returns only that dimension
+      const allDsDimensions = JSON.stringify([
+        {
+          name: "open_issue_count",
+          label: "Open Issue Count",
+          threshold_type: "min",
+          threshold_value: 0,
+          observation_method_hint: "Count open GitHub issues",
+        },
+      ]);
+
+      const mockObsEngine = {
+        getAvailableDimensionInfo(): Array<{ name: string; dimensions: string[] }> {
+          return [{ name: "github_issues", dimensions: ["open_issue_count", "closed_issue_count"] }];
+        },
+      } as unknown as ObservationEngine;
+
+      const capturingLLM = makeCapturingLLM(allDsDimensions);
+      const ethicsGate = new EthicsGate(stateManager, capturingLLM as never);
+      const negotiator = new GoalNegotiator(stateManager, capturingLLM as never, ethicsGate, mockObsEngine);
+
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        await negotiator.negotiate("Reduce open issues to zero");
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining("[GoalNegotiator] Warning: all dimensions were remapped to DataSource dimensions.")
+        );
+      } finally {
+        warnSpy.mockRestore();
+      }
+    });
+
+    it("does NOT warn when at least one dimension does NOT match DataSource dimensions", async () => {
+      // DataSource exposes "open_issue_count"; LLM returns "open_issue_count" + "code_quality" (not a DS dim)
+      const mixedDimensions = JSON.stringify([
+        {
+          name: "open_issue_count",
+          label: "Open Issue Count",
+          threshold_type: "min",
+          threshold_value: 0,
+          observation_method_hint: "Count open GitHub issues",
+        },
+        {
+          name: "code_quality",
+          label: "Code Quality",
+          threshold_type: "min",
+          threshold_value: 80,
+          observation_method_hint: "Run linter",
+        },
+      ]);
+
+      const mockObsEngine = {
+        getAvailableDimensionInfo(): Array<{ name: string; dimensions: string[] }> {
+          return [{ name: "github_issues", dimensions: ["open_issue_count", "closed_issue_count"] }];
+        },
+      } as unknown as ObservationEngine;
+
+      // Need extra feasibility call for second dimension
+      let callCount = 0;
+      const mixedLLM = {
+        async sendMessage(_messages: Array<{ role: string; content: string }>, _options?: unknown): Promise<{ content: string; usage: { input_tokens: number; output_tokens: number }; stop_reason: string }> {
+          callCount++;
+          const responses: Record<number, string> = {
+            1: PASS_VERDICT,
+            2: mixedDimensions,
+            3: FEASIBILITY_REALISTIC,
+            4: FEASIBILITY_REALISTIC,
+            5: RESPONSE_MESSAGE_ACCEPT,
+          };
+          const content = responses[callCount] ?? RESPONSE_MESSAGE_ACCEPT;
+          return { content, usage: { input_tokens: 10, output_tokens: content.length }, stop_reason: "end_turn" };
+        },
+        parseJSON<T>(content: string, schema: { parse: (v: unknown) => T }): T {
+          return schema.parse(JSON.parse(content.trim()));
+        },
+      };
+
+      const ethicsGate = new EthicsGate(stateManager, mixedLLM as never);
+      const negotiator = new GoalNegotiator(stateManager, mixedLLM as never, ethicsGate, mockObsEngine);
+
+      const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        await negotiator.negotiate("Improve code quality and reduce issues");
+        const relevantWarnings = warnSpy.mock.calls.filter(
+          (args) => typeof args[0] === "string" && (args[0] as string).includes("[GoalNegotiator] Warning: all dimensions were remapped")
+        );
+        expect(relevantWarnings).toHaveLength(0);
+      } finally {
+        warnSpy.mockRestore();
+      }
     });
   });
 });

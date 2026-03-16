@@ -173,9 +173,10 @@ export class TaskLifecycle {
     strategyId?: string,
     knowledgeContext?: string,
     adapterType?: string,
-    existingTasks?: string[]
+    existingTasks?: string[],
+    workspaceContext?: string
   ): Promise<Task> {
-    const prompt = this.buildTaskGenerationPrompt(goalId, targetDimension, knowledgeContext, adapterType, existingTasks);
+    const prompt = this.buildTaskGenerationPrompt(goalId, targetDimension, knowledgeContext, adapterType, existingTasks, workspaceContext);
 
     const response = await this.llmClient.sendMessage(
       [{ role: "user", content: prompt }],
@@ -529,7 +530,7 @@ export class TaskLifecycle {
     const progressDelta = progressByVerdict[verdict] ?? 0;
 
     // Read goal state to get actual current dimension values for previous_value / new_value.
-    const goalDataForUpdate = this.stateManager.readRaw(`goals/${task.goal_id}.json`);
+    const goalDataForUpdate = this.stateManager.readRaw(`goals/${task.goal_id}/goal.json`);
     const goalDimsForUpdate =
       goalDataForUpdate && typeof goalDataForUpdate === "object"
         ? ((goalDataForUpdate as Record<string, unknown>).dimensions as
@@ -605,7 +606,7 @@ export class TaskLifecycle {
         );
 
         // Apply dimension_updates and update last_updated for the primary dimension.
-        const goalData = this.stateManager.readRaw(`goals/${task.goal_id}.json`);
+        const goalData = this.stateManager.readRaw(`goals/${task.goal_id}/goal.json`);
         if (goalData && typeof goalData === "object") {
           const goal = goalData as Record<string, unknown>;
           const dimensions = goal.dimensions as Array<Record<string, unknown>> | undefined;
@@ -623,7 +624,7 @@ export class TaskLifecycle {
                 dim.last_updated = now;
               }
             }
-            this.stateManager.writeRaw(`goals/${task.goal_id}.json`, goal);
+            this.stateManager.writeRaw(`goals/${task.goal_id}/goal.json`, goal);
           }
         }
 
@@ -642,7 +643,7 @@ export class TaskLifecycle {
         const directionCorrect = this.isDirectionCorrect(verificationResult);
         if (directionCorrect) {
           // Apply partial dimension_updates to goal state
-          const goalDataPartial = this.stateManager.readRaw(`goals/${task.goal_id}.json`);
+          const goalDataPartial = this.stateManager.readRaw(`goals/${task.goal_id}/goal.json`);
           if (goalDataPartial && typeof goalDataPartial === "object") {
             const goal = goalDataPartial as Record<string, unknown>;
             const dimensions = goal.dimensions as Array<Record<string, unknown>> | undefined;
@@ -655,7 +656,7 @@ export class TaskLifecycle {
                   dim.current_value = update.new_value;
                 }
               }
-              this.stateManager.writeRaw(`goals/${task.goal_id}.json`, goal);
+              this.stateManager.writeRaw(`goals/${task.goal_id}/goal.json`, goal);
             }
           }
           this.appendTaskHistory(task.goal_id, task);
@@ -748,13 +749,14 @@ export class TaskLifecycle {
     driveContext: DriveContext,
     adapter: IAdapter,
     knowledgeContext?: string,
-    existingTasks?: string[]
+    existingTasks?: string[],
+    workspaceContext?: string
   ): Promise<TaskCycleResult> {
     // 1. Select target dimension
     const targetDimension = this.selectTargetDimension(gapVector, driveContext);
 
     // 2. Generate task (optionally with injected knowledge context)
-    const task = await this.generateTask(goalId, targetDimension, undefined, knowledgeContext, adapter.adapterType, existingTasks);
+    const task = await this.generateTask(goalId, targetDimension, undefined, knowledgeContext, adapter.adapterType, existingTasks, workspaceContext);
 
     // 3a. Ethics means check (reject → skip, flag → require approval, pass → proceed)
     if (this.ethicsGate) {
@@ -906,7 +908,8 @@ export class TaskLifecycle {
     targetDimension: string,
     knowledgeContext?: string,
     adapterType?: string,
-    existingTasks?: string[]
+    existingTasks?: string[],
+    workspaceContext?: string
   ): string {
     // Load goal context to enrich the prompt
     const goal = this.stateManager.loadGoal(goalId);
@@ -941,9 +944,26 @@ export class TaskLifecycle {
       } else {
         targetDesc = `equal to ${(threshold as { value: unknown }).value}`;
       }
+      const gapDesc = (() => {
+        if (threshold.type === "min") {
+          const val = typeof dim.current_value === "number" ? dim.current_value : null;
+          if (val !== null) return `${(threshold.value as number) - val} below minimum`;
+          return "current value unknown";
+        } else if (threshold.type === "max") {
+          const val = typeof dim.current_value === "number" ? dim.current_value : null;
+          if (val !== null) return `${val - (threshold.value as number)} above maximum`;
+          return "current value unknown";
+        } else if (threshold.type === "present") {
+          return dim.current_value == null ? "value is absent (needs to be set)" : "value is present";
+        }
+        return "gap exists";
+      })();
       dimensionSection = `Dimension to improve: "${targetDimension}" (label: ${dim.label})
-Current value: ${currentVal}
-Target: ${targetDesc}`;
+
+Gap Analysis:
+- Current value: ${currentVal}
+- Target threshold: ${targetDesc}
+- Gap: ${gapDesc}`;
     } else {
       dimensionSection = `Dimension to improve: "${targetDimension}"`;
     }
@@ -992,15 +1012,24 @@ IMPORTANT constraints for success_criteria:
       : "";
 
     const existingTasksSection = existingTasks && existingTasks.length > 0
-      ? `\nEXISTING OPEN TASKS (do NOT create duplicates of these):\n${existingTasks.map((t) => `- ${t}`).join("\n")}\nGenerate a task that addresses a DIFFERENT aspect of the goal than the existing tasks above.\n`
+      ? `\n=== Previously Generated Tasks (avoid duplication) ===\n${existingTasks.join("\n")}\nGenerate a task that addresses a DIFFERENT aspect of the goal than the existing tasks above.\n`
       : "";
+
+    const workspaceSection = workspaceContext
+      ? `\n=== Current Workspace State ===\n${workspaceContext}\n`
+      : "\n=== Current Workspace State ===\nNo workspace context available.\n";
 
     return `${goalSection}
 ${dimensionSection}
-${repoSection}${adapterSection}${knowledgeSection}${existingTasksSection}
+${repoSection}${adapterSection}${knowledgeSection}${workspaceSection}${existingTasksSection}
 IMPORTANT: Generate a task that is SPECIFIC to the actual project described above (goal title, description, and repository context). Do NOT suggest generic software improvements (e.g., user authentication, social media login, unrelated features) unless they are explicitly mentioned in the goal description. Base the task entirely on what the goal and project are actually about.
 
 Generate ONE specific, concrete, actionable task that will directly improve the "${targetDimension}" dimension toward its target. The task should produce a single measurable output achievable in a single work session. Do not generate vague review or triage tasks — generate a task with a precise, well-defined deliverable.
+
+IMPORTANT: The task's work_description MUST include:
+1. Target file path(s) to modify or create
+2. Specific changes (not "improve X" but "add section Y to file Z")
+3. Completion criteria that can be verified
 
 Return a JSON object with the following schema:
 {
@@ -1196,7 +1225,7 @@ After completing the revert, respond with a JSON object:
   ): void {
     // Attempt to update the dimension's state_integrity flag
     // Read the goal, find the dimension, update integrity
-    const goalData = this.stateManager.readRaw(`goals/${goalId}.json`);
+    const goalData = this.stateManager.readRaw(`goals/${goalId}/goal.json`);
     if (goalData && typeof goalData === "object") {
       const goal = goalData as Record<string, unknown>;
       const dimensions = goal.dimensions as Array<Record<string, unknown>> | undefined;
@@ -1206,7 +1235,7 @@ After completing the revert, respond with a JSON object:
             dim.state_integrity = integrity;
           }
         }
-        this.stateManager.writeRaw(`goals/${goalId}.json`, goal);
+        this.stateManager.writeRaw(`goals/${goalId}/goal.json`, goal);
       }
     }
   }

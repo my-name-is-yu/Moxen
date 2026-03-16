@@ -390,9 +390,9 @@ describe("Milestone 2 D-3: npm publish preparation goal", () => {
     // The second prompt should include the dedup/existing-tasks section
     expect(sentPrompts).toHaveLength(2);
     const secondPrompt = sentPrompts[1]!;
-    expect(secondPrompt).toContain("EXISTING OPEN TASKS");
+    expect(secondPrompt).toContain("Previously Generated Tasks");
     expect(secondPrompt).toContain(existingTaskDescription);
-    expect(secondPrompt).toContain("do NOT create duplicates");
+    expect(secondPrompt).toContain("DIFFERENT aspect");
   });
 
   // ─────────────────────────────────────────────────────────────────────────

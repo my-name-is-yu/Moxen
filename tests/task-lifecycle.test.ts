@@ -1573,7 +1573,7 @@ describe("TaskLifecycle", () => {
       const task = makeTask({ target_dimensions: ["dim"] });
       const result = makeExecutionResult();
 
-      stateManager.writeRaw("goals/goal-1.json", {
+      stateManager.writeRaw("goals/goal-1/goal.json", {
         id: "goal-1",
         title: "Test Goal",
         status: "active",
@@ -1595,7 +1595,7 @@ describe("TaskLifecycle", () => {
       const task = makeTask({ target_dimensions: ["dim"] });
       const result = makeExecutionResult();
 
-      stateManager.writeRaw("goals/goal-1.json", {
+      stateManager.writeRaw("goals/goal-1/goal.json", {
         id: "goal-1",
         title: "Test Goal",
         status: "active",
@@ -1619,7 +1619,7 @@ describe("TaskLifecycle", () => {
       const task = makeTask({ target_dimensions: ["dim"] });
       const result = makeExecutionResult();
 
-      stateManager.writeRaw("goals/goal-1.json", {
+      stateManager.writeRaw("goals/goal-1/goal.json", {
         id: "goal-1",
         title: "Test Goal",
         status: "active",
@@ -1651,7 +1651,7 @@ describe("TaskLifecycle", () => {
       });
       const result = makeExecutionResult();
 
-      stateManager.writeRaw("goals/goal-1.json", {
+      stateManager.writeRaw("goals/goal-1/goal.json", {
         id: "goal-1",
         title: "Test Goal",
         status: "active",
@@ -1840,7 +1840,7 @@ describe("TaskLifecycle", () => {
 
       // Write goal with a dimension whose last_updated is null
       const oldTimestamp = null;
-      stateManager.writeRaw("goals/goal-1.json", {
+      stateManager.writeRaw("goals/goal-1/goal.json", {
         id: "goal-1",
         title: "Test Goal",
         status: "active",
@@ -1857,7 +1857,7 @@ describe("TaskLifecycle", () => {
       await lifecycle.handleVerdict(task, vr);
       const after = new Date().toISOString();
 
-      const goal = stateManager.readRaw("goals/goal-1.json") as Record<string, unknown>;
+      const goal = stateManager.readRaw("goals/goal-1/goal.json") as Record<string, unknown>;
       const dims = goal.dimensions as Array<Record<string, unknown>>;
       const coverageDim = dims.find((d) => d.name === "coverage");
       const performanceDim = dims.find((d) => d.name === "performance");
@@ -1878,7 +1878,7 @@ describe("TaskLifecycle", () => {
       const vr = makeVerificationResult({ verdict: "pass" });
 
       const oldTimestamp = "2020-01-01T00:00:00.000Z";
-      stateManager.writeRaw("goals/goal-1.json", {
+      stateManager.writeRaw("goals/goal-1/goal.json", {
         id: "goal-1",
         title: "Test Goal",
         status: "active",
@@ -1892,7 +1892,7 @@ describe("TaskLifecycle", () => {
 
       await lifecycle.handleVerdict(task, vr);
 
-      const goal = stateManager.readRaw("goals/goal-1.json") as Record<string, unknown>;
+      const goal = stateManager.readRaw("goals/goal-1/goal.json") as Record<string, unknown>;
       const dims = goal.dimensions as Array<Record<string, unknown>>;
       const coverageDim = dims.find((d) => d.name === "coverage");
 
@@ -1926,7 +1926,7 @@ describe("TaskLifecycle", () => {
       });
 
       const oldTimestamp = "2020-01-01T00:00:00.000Z";
-      stateManager.writeRaw("goals/goal-1.json", {
+      stateManager.writeRaw("goals/goal-1/goal.json", {
         id: "goal-1",
         title: "Test Goal",
         status: "active",
@@ -1940,7 +1940,7 @@ describe("TaskLifecycle", () => {
 
       await lifecycle.handleVerdict(task, vr);
 
-      const goal = stateManager.readRaw("goals/goal-1.json") as Record<string, unknown>;
+      const goal = stateManager.readRaw("goals/goal-1/goal.json") as Record<string, unknown>;
       const dims = goal.dimensions as Array<Record<string, unknown>>;
       const coverageDim = dims.find((d) => d.name === "coverage");
 
@@ -1963,7 +1963,7 @@ describe("TaskLifecycle", () => {
         ],
       });
 
-      stateManager.writeRaw("goals/goal-1.json", {
+      stateManager.writeRaw("goals/goal-1/goal.json", {
         id: "goal-1",
         title: "Test Goal",
         status: "active",
@@ -1977,7 +1977,7 @@ describe("TaskLifecycle", () => {
 
       await lifecycle.handleVerdict(task, vr);
 
-      const goal = stateManager.readRaw("goals/goal-1.json") as Record<string, unknown>;
+      const goal = stateManager.readRaw("goals/goal-1/goal.json") as Record<string, unknown>;
       const dims = goal.dimensions as Array<Record<string, unknown>>;
       const coverageDim = dims.find((d) => d.name === "coverage");
 
@@ -1998,7 +1998,7 @@ describe("TaskLifecycle", () => {
         ],
       });
 
-      stateManager.writeRaw("goals/goal-1.json", {
+      stateManager.writeRaw("goals/goal-1/goal.json", {
         id: "goal-1",
         title: "Test Goal",
         status: "active",
@@ -2012,7 +2012,7 @@ describe("TaskLifecycle", () => {
 
       await lifecycle.handleVerdict(task, vr);
 
-      const goal = stateManager.readRaw("goals/goal-1.json") as Record<string, unknown>;
+      const goal = stateManager.readRaw("goals/goal-1/goal.json") as Record<string, unknown>;
       const dims = goal.dimensions as Array<Record<string, unknown>>;
       const coverageDim = dims.find((d) => d.name === "coverage");
 
@@ -2037,7 +2037,7 @@ describe("TaskLifecycle", () => {
         ],
       });
 
-      stateManager.writeRaw("goals/goal-1.json", {
+      stateManager.writeRaw("goals/goal-1/goal.json", {
         id: "goal-1",
         title: "Test Goal",
         status: "active",
@@ -2052,7 +2052,7 @@ describe("TaskLifecycle", () => {
       const result = await lifecycle.handleVerdict(task, vr);
       expect(result.action).toBe("keep");
 
-      const goal = stateManager.readRaw("goals/goal-1.json") as Record<string, unknown>;
+      const goal = stateManager.readRaw("goals/goal-1/goal.json") as Record<string, unknown>;
       const dims = goal.dimensions as Array<Record<string, unknown>>;
       const qualityDim = dims.find((d) => d.name === "quality");
 
@@ -2260,7 +2260,7 @@ describe("TaskLifecycle", () => {
       });
 
       // Set up a goal with dimensions for state_integrity update
-      stateManager.writeRaw(`goals/goal-1.json`, {
+      stateManager.writeRaw(`goals/goal-1/goal.json`, {
         id: "goal-1",
         title: "Test goal",
         dimensions: [{ name: "dim", state_integrity: "ok" }],
@@ -2273,7 +2273,7 @@ describe("TaskLifecycle", () => {
       expect(result.action).toBe("escalate");
 
       // Verify state_integrity was set to uncertain
-      const goal = stateManager.readRaw(`goals/goal-1.json`) as Record<string, unknown>;
+      const goal = stateManager.readRaw(`goals/goal-1/goal.json`) as Record<string, unknown>;
       const dims = goal.dimensions as Array<Record<string, unknown>>;
       expect(dims[0]!.state_integrity).toBe("uncertain");
     });
