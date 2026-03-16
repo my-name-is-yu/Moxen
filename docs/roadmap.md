@@ -2,7 +2,7 @@
 
 ## 現在地
 
-Stage 1-14 完了（2844テスト、65テストファイル）。Dogfooding Phase A/B 完了。Milestone 1（LLM-powered観測）完了。Milestone 2（中規模Dogfooding検証）完了。GitHub Issueアダプタ・FileExistenceDataSourceAdapter実装済み。詳細は `docs/status.md` 参照。
+Stage 1-14 完了。Milestone 1-6 完了（3105テスト、83テストファイル）。Dogfooding Phase A/B 完了。GitHub Issueアダプタ・FileExistenceDataSourceAdapter・能力自律調達フルサイクル・ホットプラグ実装済み。詳細は `docs/status.md` 参照。
 
 ---
 
@@ -203,25 +203,24 @@ Stage 12で埋め込み基盤（EmbeddingClient, VectorIndex, KnowledgeGraph, Go
 
 ## Milestone 6: 能力自律調達 Phase 2
 
+**Status**: 完了 ✅
+
 **ビジョン対応**: 6. 現実世界との接続 / 7. 自律的ツール調達
 
-Stage 13でCapabilityDetector拡張・DataSourceAdapterは実装済み。Phase 2ではフルサイクル（能力不足検出→調達→検証→登録）を完成させる。
+Stage 13でCapabilityDetector拡張・DataSourceAdapterは実装済み。Phase 2ではフルサイクル（能力不足検出→調達→検証→登録）を完成させた。
 
-### 6.1 能力自律調達フルサイクル（13.1）
+### 6.1 能力自律調達フルサイクル（M6.1a + M6.1b）
 
-設計: `docs/design/execution-boundary.md` Phase 2
+- CoreLoopに `capability_acquiring` ハンドラ追加 — 検出→委譲→検証→登録のフルサイクル
+- CLI: `capability list`, `capability remove` サブコマンド追加
+- `data_source_setup` タスクタイプ追加（データソース設定委譲用）
 
-- エージェントへのツール/コード作成委譲（自律的能力調達）の完成
-- 外部サービス連携の自動ガイド生成（設定手順をユーザーに提示、承認後に連携完了）
-- 能力不足検出 → 調達 → 検証 → 登録 のフルサイクル検証
+### 6.2 Capability Registryの動的管理（M6.2a + M6.2b）
 
-### 6.2 Capability Registryの動的管理（13.3）
+- `DataSourceRegistry.upsert()` 追加 — ObservationEngineへの動的追加/削除
+- 能力依存解決: トポロジカルソート + 循環依存検出
 
-- 委譲可能な能力カタログの動的管理
-- 新しい種類のアダプタ/データソースのホットプラグ
-- 能力の依存関係と組み合わせの管理
-
-**Dogfooding検証**: Motivaに「まだ持っていない能力を使うゴール」を与え、自律的に能力調達タスクをエージェントに委譲し、検証・登録が完了することを確認する。
+**実装結果**: 43テスト追加（3105テスト合計、83テストファイル）。
 
 ---
 

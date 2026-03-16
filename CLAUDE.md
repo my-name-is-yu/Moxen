@@ -8,7 +8,7 @@ Motiva — AI agent orchestrator that gives existing agents "motivation." Motiva
 
 ## Status
 
-Implementation Phase — Stage 1-14 + Milestone 1-5 complete (3036 tests, 77 test files).
+Implementation Phase — Stage 1-14 + Milestone 1-6 complete (3105 tests, 83 test files).
 See `docs/status.md` for stage-by-stage details.
 
 ## Core Concept
