@@ -39,6 +39,15 @@ npx vitest run
 
 See `memory/archive/impl-roadmap-research.md` for module dependency graph and implementation order. For full stage-by-stage details, see `docs/status.md`.
 
+## モジュール境界マップ
+
+`docs/module-map.md` に全モジュールの責務・主要export・依存関係・対応テストファイルをまとめている。
+変更対象ファイルの特定に使用すること。
+
+## 開発基盤整備計画
+
+`docs/design/phase3-plan.md` に残りのファイル分割計画（柱1）、テスト効率化計画（柱3）をまとめている。
+
 ### Implementation Layers (bottom-up)
 
 - Layer 0: StateManager, AdapterLayer (no dependencies)
