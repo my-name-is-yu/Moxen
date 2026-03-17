@@ -311,7 +311,7 @@ export class TaskLifecycle {
    * Creates a session, builds context, converts to AgentTask, executes
    * via adapter, ends session, and updates task status based on result.
    */
-  async executeTask(task: Task, adapter: IAdapter): Promise<AgentResult> {
+  async executeTask(task: Task, adapter: IAdapter, workspaceContext?: string): Promise<AgentResult> {
     // Create execution session
     const session = this.sessionManager.createSession(
       "task_execution",
@@ -344,7 +344,10 @@ export class TaskLifecycle {
         `- Do NOT change function visibility (private→export), file structure, or imports in unrelated files\n` +
         `- Do NOT modify build configuration or dependency files\n` +
         `- If a file contains the target pattern inside a string literal or template, leave it as-is`;
-      const taskDescription = `You are an AI agent executing a task.\n\nTask: ${task.work_description}\n\nApproach: ${task.approach}\n\nSuccess Criteria:\n${task.success_criteria.map((c) => `- ${c.description}`).join("\n")}${scopeConstraints}`;
+      const contextSection = workspaceContext
+        ? `\n\nWORKSPACE CONTEXT (use these specific locations):\n${workspaceContext}`
+        : "";
+      const taskDescription = `You are an AI agent executing a task.\n\nTask: ${task.work_description}\n\nApproach: ${task.approach}\n\nSuccess Criteria:\n${task.success_criteria.map((c) => `- ${c.description}`).join("\n")}${scopeConstraints}${contextSection}`;
 
       const contextContent = contextSlots
         .filter((slot) => slot.content.trim().length > 0) // Skip empty slots
@@ -695,7 +698,7 @@ export class TaskLifecycle {
 
     // 4. Execute task
     if (DEBUG) console.log(`[DEBUG-TL] Executing task ${task.id} via adapter ${adapter.adapterType}`);
-    const executionResult = await this.executeTask(task, adapter);
+    const executionResult = await this.executeTask(task, adapter, workspaceContext);
     if (DEBUG) console.log(`[DEBUG-TL] Execution result: success=${executionResult.success}, stopped=${executionResult.stopped_reason}, error=${executionResult.error}, output=${executionResult.output?.substring(0, 200)}`);
 
     // 4b. Post-execution health check (opt-in)
