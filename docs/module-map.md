@@ -78,7 +78,9 @@
 | プロセスID管理 | src/runtime/pid-manager.ts | tests/pid-manager.test.ts |
 | ロガー | src/runtime/logger.ts | tests/logger.test.ts |
 | イベントサーバ | src/runtime/event-server.ts | tests/event-server.test.ts |
-| 通知ディスパッチャ | src/runtime/notification-dispatcher.ts | tests/notification-dispatcher.test.ts |
+| 通知ディスパッチャ | src/runtime/notification-dispatcher.ts | tests/notification-dispatcher.test.ts, tests/notification-dispatcher-plugin.test.ts |
+| プラグインローダー | src/runtime/plugin-loader.ts | tests/plugin-loader.test.ts |
+| 通知プラグインレジストリ | src/runtime/notifier-registry.ts | tests/notifier-registry.test.ts |
 | Claudeアダプタ（CLI） | src/adapters/claude-code-cli.ts | tests/claude-code-cli-adapter.test.ts |
 | Claudeアダプタ（API） | src/adapters/claude-api.ts | (adapter-layer.test.ts 経由) |
 | OpenAI Codex CLIアダプタ | src/adapters/openai-codex.ts | tests/openai-codex-adapter.test.ts |
@@ -86,6 +88,9 @@
 | GitHub Issue データソース | src/adapters/github-issue-datasource.ts | tests/github-issue-datasource.test.ts |
 | ファイル存在データソース | src/adapters/file-existence-datasource.ts | tests/file-existence-datasource.test.ts |
 | シェルデータソース | src/adapters/shell-datasource.ts | tests/adapters/shell-datasource.test.ts |
+| プラグイン型定義・INotifier | src/types/plugin.ts | tests/plugin-loader.test.ts, tests/notifier-registry.test.ts |
+| プラグイン動的ロード | src/runtime/plugin-loader.ts | tests/plugin-loader.test.ts |
+| 通知プラグイン管理 | src/runtime/notifier-registry.ts | tests/notifier-registry.test.ts |
 | コアループ | src/core-loop.ts | tests/core-loop.test.ts, tests/core-loop-integration.test.ts, tests/core-loop-capability.test.ts, tests/r1-core-loop-completion.test.ts |
 | コアループ型定義・DI | src/loop/core-loop-types.ts | tests/core-loop.test.ts |
 | ツリーループ実行ヘルパー | src/loop/tree-loop-runner.ts | tests/tree-loop-orchestrator.test.ts |
@@ -216,9 +221,11 @@
 |---|---|---|---|
 | logger.ts | 構造化ログ出力（debug/info/warn/error） | `Logger`, `LogLevel`, `LoggerConfig` | node:fs |
 | pid-manager.ts | デーモンPIDファイル管理 | `PIDManager` | node:fs |
-| daemon-runner.ts | デーモン起動・停止・再起動管理 | `DaemonRunner`, `DaemonDeps` | runtime/pid-manager, runtime/logger, runtime/event-server, types/daemon |
-| event-server.ts | ファイルキューベースイベント受信 | `EventServer`, `EventServerConfig` | node:fs |
-| notification-dispatcher.ts | 通知送信（stdout/ファイル/webhook） | `NotificationDispatcher`, `INotificationDispatcher` | runtime/logger, types/notification |
+| daemon-runner.ts | デーモン起動・停止・再起動管理・グレースフルシャットダウン・クラッシュリカバリ | `DaemonRunner`, `DaemonDeps` | runtime/pid-manager, runtime/logger, runtime/event-server, types/daemon |
+| event-server.ts | ファイルキューベースイベント受信・リアルタイムファイルウォッチャー（fs.watch） | `EventServer`, `EventServerConfig` | node:fs |
+| notification-dispatcher.ts | 通知送信（stdout/ファイル/webhook）+ INotifierプラグインへのルーティング | `NotificationDispatcher`, `INotificationDispatcher` | runtime/logger, runtime/notifier-registry, types/notification |
+| plugin-loader.ts | `~/.motiva/plugins/` からの動的プラグイン読み込み・マニフェスト検証・レジストリ自動登録 | `PluginLoader`, `PluginLoaderOptions` | runtime/notifier-registry, execution/adapter-layer, observation/data-source-adapter, types/plugin |
+| notifier-registry.ts | INotifierプラグインのCRUD管理・eventType別ルーティング | `NotifierRegistry` | types/plugin |
 
 ### src/adapters/ — エージェントアダプタ実装
 
@@ -231,6 +238,12 @@
 | github-issue-datasource.ts | GitHub Issue状態の観測データソース | `GitHubIssueDataSourceAdapter` (IDataSourceAdapter) | observation/data-source-adapter, types/data-source |
 | file-existence-datasource.ts | ファイル存在を観測するデータソース | `FileExistenceDataSourceAdapter` (IDataSourceAdapter) | observation/data-source-adapter, types/data-source |
 | shell-datasource.ts | シェルコマンド出力を観測するデータソース | `ShellDataSourceAdapter`, `ShellCommandSpec` | observation/data-source-adapter, types/data-source |
+
+### plugins/ — サンプルプラグイン（コア外）
+
+| ディレクトリ | 概要 | テストファイル |
+|---|---|---|
+| plugins/slack-notifier/ | Slack Webhook通知プラグイン（INotifier実装サンプル）。plugin.yaml（マニフェスト）+ src/index.ts（実装）。コア非依存、独立npm package。 | tests/plugin-slack-notifier.test.ts |
 
 ### src/ — ルートモジュール（統合レイヤー）
 
@@ -312,6 +325,7 @@
 | types/portfolio.ts | PortfolioState |
 | types/negotiation.ts | NegotiationResult |
 | types/suggest.ts | SuggestOutput |
+| types/plugin.ts | PluginManifest, INotifier, NotificationEvent, NotificationEventType |
 | types/index.ts | 全型の再エクスポート |
 
 ---

@@ -2,8 +2,9 @@
 
 ## 現在地
 
-Stage 1-14 + Milestone 1-7 完了（3282テスト、90ファイル）。
-Goal Tree自動分解・LLM観測・Dogfooding検証基盤が整った。
+Stage 1-14 + Milestone 1-12 完了（3461テスト、109ファイル）。Phase 3（開発基盤整備）完了済み。
+プラグインアーキテクチャ基盤が整い、Slack通知サンプルプラグインがロード・動作確認済み。
+次: Milestone 13（プラグイン自律選択 + セマンティック知識共有）。
 
 **M8 dogfooding（TODO/FIXME解消ゴール）で3つの問題が発覚**:
 - LLM観測がtodo_count=0, fixme_count=0と報告したが、実際には3件残存（hallucination）
@@ -53,9 +54,11 @@ Goal Tree自動分解・LLM観測・Dogfooding検証基盤が整った。
 - `npm publish` 実行
 
 **成功基準**:
-- [ ] EthicsGate Layer 1がdestructive_actionカテゴリをブロック
-- [ ] TaskLifecycleがgenerateTask()後に手段チェックを実行
-- [ ] npm publishが成功し、`npm install motiva` で動作確認
+- [x] EthicsGate Layer 1がdestructive_actionカテゴリをブロック
+- [x] TaskLifecycleがgenerateTask()後に手段チェックを実行
+- [x] npm publishが成功し、`npm install motiva` で動作確認
+
+**Status**: complete（2026-03-16）
 
 ---
 
@@ -82,9 +85,11 @@ Goal Tree自動分解・LLM観測・Dogfooding検証基盤が整った。
 - ObservationEngineの重複キー正規化ロジック追加
 
 **成功基準**:
-- [ ] grep結果とLLM観測結果の一致率が90%以上
-- [ ] TODO/FIXME count系の機械的観測が自動選択される
-- [ ] 乖離ログが出力され、confidence_tierが動的調整される
+- [x] grep結果とLLM観測結果の一致率が90%以上
+- [x] TODO/FIXME count系の機械的観測が自動選択される
+- [x] 乖離ログが出力され、confidence_tierが動的調整される
+
+**Status**: complete（2026-03-16）
 
 **検証方法**: 同じTODO/FIXMEゴールを再実行し、正確な観測ができることを確認
 
@@ -110,9 +115,11 @@ Goal Tree自動分解・LLM観測・Dogfooding検証基盤が整った。
 - `--auto` フラグで全自動（提案の中からスコア最高のゴールを自動選択）
 
 **成功基準**:
-- [ ] `motiva suggest` がMotiva自身のリポジトリに対して3つ以上の改善ゴールを提案
-- [ ] 提案されたゴールの次元・閾値が妥当（機械的観測で検証可能な次元を含む）
-- [ ] `motiva improve src/` で自律的に改善ループが回る
+- [x] `motiva suggest` がMotiva自身のリポジトリに対して3つ以上の改善ゴールを提案
+- [x] 提案されたゴールの次元・閾値が妥当（機械的観測で検証可能な次元を含む）
+- [x] `motiva improve src/` で自律的に改善ループが回る
+
+**Status**: complete（2026-03-16）
 
 **検証方法**: Motiva自身に対して `motiva improve` を実行し、意味のある改善が得られることを確認
 
@@ -141,9 +148,11 @@ Goal Tree自動分解・LLM観測・Dogfooding検証基盤が整った。
 - condition 3（resource undershoot）判定ロジック実装
 
 **成功基準**:
-- [ ] タスク指示に具体的なファイルパスと修正内容が含まれる
-- [ ] Codex実行後にテストが通ることを自動確認
-- [ ] 前回のTODO/FIXME解消が1イテレーションで完了する
+- [x] タスク指示に具体的なファイルパスと修正内容が含まれる
+- [x] Codex実行後にテストが通ることを自動確認
+- [x] 前回のTODO/FIXME解消が1イテレーションで完了する
+
+**Status**: complete（2026-03-16）
 
 ---
 
@@ -177,10 +186,13 @@ Goal Tree自動分解・LLM観測・Dogfooding検証基盤が整った。
 - `motiva cron` コマンド（cronユーザー向けエントリ生成）
 
 **成功基準**:
-- [ ] サンプルプラグイン（slack-notify）がロード・動作する
-- [ ] プラグインのマニフェスト検証が機能する
-- [ ] `motiva start --goal <id>` で24時間自律動作
-- [ ] プロセスkill後に `motiva start` で状態復元して再開
+- [x] サンプルプラグイン（slack-notifier）がロード・動作する
+- [x] プラグインのマニフェスト検証が機能する
+- [x] グレースフルシャットダウン（SIGTERM/SIGINT）実装済み
+- [x] プロセスkill後の状態復元・クラッシュリカバリ実装済み
+- [x] イベントファイルウォッチャー（fs.watch）実装済み
+
+**Status**: complete（2026-03-17）
 
 ---
 

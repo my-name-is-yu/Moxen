@@ -1,11 +1,11 @@
 # Implementation Status
 
-Current repository state as of 2026-03-16.
+Current repository state as of 2026-03-17.
 
-- Implementation scope: source modules for Stage 1-14 and Milestone 1-7 are present in `src/`
-- Source inventory: 94 `.ts` / `.tsx` implementation files under `src/`
-- Test inventory: 38 test files in the current status inventory baseline
-- Current test result: the latest status audit confirms the inventory baseline of 38 test files used in this document
+- Implementation scope: source modules for Stage 1-14 and Milestone 1-12 are present in `src/`; Phase 3 refactoring complete
+- Source inventory: 132 `.ts` / `.tsx` implementation files under `src/`
+- Test inventory: 109 test files
+- Current test result: 3461 tests passing (excludes e2e tests)
 
 ## Stage 1 (complete)
 - Implementation modules: `src/state-manager.ts`, `src/gap-calculator.ts`, core schemas in `src/types/` (`goal.ts`, `state.ts`, `task.ts`, `report.ts`, `drive.ts`, `trust.ts`, `stall.ts`, `strategy.ts`, `negotiation.ts`, `gap.ts`, `core.ts`)
@@ -117,9 +117,71 @@ Current repository state as of 2026-03-16.
 - Dedicated E2E validation: `tests/e2e/milestone7-goal-tree.test.ts`
 - Status: implementation present and milestone-specific tests passed in the latest suite run
 
+## Phase 3: 開発基盤整備（complete）
+
+Phase 3 は実装機能追加ではなく、コードベースの品質・保守性向上を目的とした3本柱の整備。`docs/design/phase3-plan.md` 参照。
+
+### 柱1: 大ファイル分割（complete）
+- Phase 2: 4ファイルを18ファイルに分割（`cross-goal-portfolio.ts`, `capability-detector.ts`, `memory-lifecycle.ts`, `learning-pipeline.ts` → 各責務別サブモジュールに分離）
+- 統合エントリポイント（元ファイル名）がオーケストレーションのみ担当し、実装を委譲先サブモジュールに移動
+- モジュール境界マップ (`docs/module-map.md`) を全モジュール対応に更新
+
+### 柱2: サブディレクトリ整理（complete）
+- `src/` 直下48ファイルを9サブフォルダに整理（`src/goal/`, `src/drive/`, `src/execution/`, `src/observation/`, `src/llm/`, `src/strategy/`, `src/knowledge/`, `src/traits/`, `src/runtime/`）
+- 既存テストとimportパスの一括更新
+
+### 柱3: テスト効率化（complete）
+- 共通モックファクトリ・テストヘルパーの整備
+- テスト重複排除・カバレッジ向上
+
+---
+
+## Milestone 8: 安全性強化 + npm公開（complete）
+- EthicsGate Layer 1（destructive_action, credential_access カテゴリブロック）
+- TaskLifecycle L1機械検証実装
+- CLI flags検証、package.json整備
+- Status: complete
+
+## Milestone 9: 観測精度強化（complete）
+- `src/adapters/shell-datasource.ts` — ShellDataSourceAdapter（execFile使用、セキュア）
+- `src/observation/observation-engine.ts` 拡張 — normalizeDimensionName(), crossValidate(), ObservationEngineOptions
+- LLMプロンプト英語化 + Few-shot 3例キャリブレーション
+- Status: complete
+
+## Milestone 10: ゴール自動生成（complete）
+- `src/goal/goal-negotiator.ts` 拡張 — suggestGoals(), filterSuggestions()
+- `src/cli-runner.ts` 拡張 — `motiva suggest`, `motiva improve [path]` コマンド
+- Status: complete
+
+## Milestone 11: 戦略自律選択 + 実行品質（complete）
+- `src/observation/context-provider.ts` 新規 — buildWorkspaceContext()
+- `src/execution/task-health-check.ts` 拡張 — runPostExecutionHealthCheck()
+- `src/knowledge/memory-lifecycle.ts` 拡張 — DriveScoreAdapter配線完全接続
+- `src/drive/satisficing-judge.ts` 拡張 — condition 3 resource_undershoot実装
+- Status: complete
+
+## Milestone 12: プラグインアーキテクチャ（complete）
+
+**テーマ**: コアを薄く保ちながら拡張機能をプラグインとして分離する。特定サービス依存（Slack等）はコアに含めずプラグインとして提供。
+
+### 実装モジュール
+- `src/types/plugin.ts` — プラグインマニフェスト・INotifierインタフェース・NotificationEvent型定義（Zodスキーマ）
+- `src/runtime/plugin-loader.ts` — `~/.motiva/plugins/` からの動的プラグイン読み込み・マニフェスト検証・AdapterRegistry/DataSourceRegistry/NotifierRegistryへの自動登録
+- `src/runtime/notifier-registry.ts` — INotifierプラグインのCRUD管理・eventType別ルーティング
+- `src/runtime/notification-dispatcher.ts` 拡張 — NotifierRegistryへのルーティング統合
+- `src/runtime/daemon-runner.ts` 拡張 — SIGTERM/SIGINTグレースフルシャットダウン・クラッシュリカバリ・ログローテーション
+- `src/runtime/event-server.ts` 拡張 — `~/.motiva/events/` のリアルタイムファイルウォッチャー（fs.watch）
+- `plugins/slack-notifier/` — サンプルプラグイン（Slack Webhook送信実装、plugin.yaml + src/index.ts）
+
+### テスト検証
+- Dedicated validation: 4 test files, 74 explicit `it()` / `test()` blocks
+- Dedicated tests: `tests/plugin-loader.test.ts`, `tests/notifier-registry.test.ts`, `tests/plugin-slack-notifier.test.ts`, `tests/notification-dispatcher-plugin.test.ts`
+- Status: complete; all planned M12 components implemented and tests passing
+
+---
+
 ## Notes
 - Counts above are based on the current checked-in `src/` and `tests/` directories.
 - Source inventory includes both `.ts` and `.tsx` files under `src/`.
-- Test inventory in this status document uses a 38-file baseline for the current audit and excludes non-test helpers.
-- The repository currently contains 3286 explicit `it()` / `test()` blocks by source scan, while the latest `vitest run` executes 3282 tests; the runner count is authoritative for the top-level inventory.
+- The latest `vitest run` executes 3461 tests (excluding e2e suite); the runner count is authoritative for the top-level inventory.
 - "Dedicated validation" counts are based on explicit `it()` / `test()` blocks in the test files mapped to each stage or milestone; they are not additive across the whole document because some areas intentionally overlap.

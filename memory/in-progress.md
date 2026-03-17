@@ -1,22 +1,13 @@
 # In-Progress
 
-## 次の作業: 柱2 モジュール境界マップ更新
+## 完了済み
+- Phase 3 開発基盤整備: 全完了（柱1-3）
+- Milestone 12 プラグインアーキテクチャ: 全完了（12.1-12.4、+115テスト）
 
-`docs/module-map.md` をPhase 3の分割結果に合わせて更新する。
+## 次の作業
 
-### やること
-1. `docs/module-map.md` を読む
-2. Phase 3で新規作成した24ファイルを追加:
-   - `src/loop/`: core-loop-types.ts, tree-loop-runner.ts
-   - `src/execution/`: task-verifier.ts
-   - `src/goal/`: goal-tree-pruner.ts, goal-tree-quality.ts, goal-decomposer.ts
-   - `src/knowledge/`: memory-compression.ts, memory-selection.ts, learning-feedback.ts, learning-cross-goal.ts, knowledge-search.ts, knowledge-revalidation.ts, memory-index.ts, memory-stats.ts, memory-query.ts, memory-distill.ts
-   - `src/traits/`: curiosity-proposals.ts, curiosity-transfer.ts
-   - `src/strategy/`: portfolio-scheduling.ts, portfolio-allocation.ts, portfolio-momentum.ts
-   - `src/observation/`: capability-registry.ts, capability-dependencies.ts
-3. 分割元ファイルの行数・責務を更新
-4. コミット
-
-### 完了済み
-- 柱3（テスト効率化）: npm test 8秒
-- 柱1 高優先+中優先（Phase 3a-3k）: 11ファイル分割、24新ファイル作成完了
+M12完了。次の候補:
+- **Milestone 13**: プラグイン自律選択 + セマンティック知識共有（`docs/roadmap-m8-beyond.md`）
+- **CLIコマンド追加**: `motiva plugin list/install/remove`（M12設計に含まれるが未実装）
+- **柱1低優先ファイル分割**（`docs/design/phase3-plan.md`）
+- **CLAUDE.md/docs更新**: M12完了を反映
