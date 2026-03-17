@@ -12,6 +12,8 @@ import type {
   WebhookChannel,
 } from "../types/notification.js";
 import { NotificationConfigSchema } from "../types/notification.js";
+import type { NotificationEvent, NotificationEventType } from "../types/plugin.js";
+import type { NotifierRegistry } from "./notifier-registry.js";
 
 // ─── Interface ───
 
@@ -296,15 +298,47 @@ async function sendWebhook(
   }
 }
 
+// ─── Report type → NotificationEventType mapping ───
+
+/**
+ * Map an internal report_type string to the closest NotificationEventType
+ * for routing to INotifier plugins. Returns null when no mapping applies.
+ */
+function reportTypeToEventType(reportType: string): NotificationEventType | null {
+  switch (reportType) {
+    case "goal_completion":
+      return "goal_complete";
+    case "urgent_alert":
+      return "approval_needed";
+    case "stall_escalation":
+      return "stall_detected";
+    case "strategy_change":
+      return "goal_progress";
+    case "capability_escalation":
+      return "task_blocked";
+    case "progress_update":
+      return "goal_progress";
+    default:
+      return null;
+  }
+}
+
 // ─── NotificationDispatcher ───
 
 export class NotificationDispatcher implements INotificationDispatcher {
   private config: NotificationConfig;
   /** reportType -> timestamp of last successful send */
   private lastSent: Map<string, number> = new Map();
+  private notifierRegistry?: NotifierRegistry;
 
-  constructor(config?: Partial<NotificationConfig>) {
+  constructor(config?: Partial<NotificationConfig>, notifierRegistry?: NotifierRegistry) {
     this.config = NotificationConfigSchema.parse(config ?? {});
+    this.notifierRegistry = notifierRegistry;
+  }
+
+  /** Replace or set the NotifierRegistry after construction. */
+  setNotifierRegistry(registry: NotifierRegistry): void {
+    this.notifierRegistry = registry;
   }
 
   /** Dispatch report to all configured channels */
@@ -356,7 +390,58 @@ export class NotificationDispatcher implements INotificationDispatcher {
       }
     }
 
+    // Route to NotifierRegistry plugins (additive, failures don't affect core dispatch)
+    await this.dispatchToPluginNotifiers(report);
+
     return results;
+  }
+
+  /**
+   * Route the report to all matching INotifier plugins registered in the
+   * NotifierRegistry. Plugin failures are logged but never propagated.
+   */
+  private async dispatchToPluginNotifiers(report: Report): Promise<void> {
+    if (!this.notifierRegistry) return;
+
+    const eventType = reportTypeToEventType(report.report_type);
+    if (eventType === null) return;
+
+    const notifiers = this.notifierRegistry.findForEvent(eventType);
+    if (notifiers.length === 0) return;
+
+    const event: NotificationEvent = {
+      type: eventType,
+      goal_id: report.goal_id ?? "",
+      timestamp: report.generated_at,
+      summary: report.title,
+      details: {
+        report_id: report.id,
+        report_type: report.report_type,
+        content: report.content,
+        verbosity: report.verbosity,
+      },
+      severity: this.resolveSeverity(report.report_type),
+    };
+
+    const settlements = await Promise.allSettled(
+      notifiers.map((n) => n.notify(event))
+    );
+
+    for (let i = 0; i < settlements.length; i++) {
+      const result = settlements[i];
+      if (result.status === "rejected") {
+        const notifierName = notifiers[i].name;
+        const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
+        console.error(`[NotificationDispatcher] plugin notifier "${notifierName}" failed: ${reason}`);
+      }
+    }
+  }
+
+  /** Derive a severity level from the report type. */
+  private resolveSeverity(reportType: string): "info" | "warning" | "critical" {
+    if (reportType === "urgent_alert") return "critical";
+    if (reportType === "stall_escalation" || reportType === "capability_escalation") return "warning";
+    return "info";
   }
 
   // ─── Private helpers ───

@@ -1,0 +1,29 @@
+name: slack-notifier
+version: "1.0.0"
+type: notifier
+capabilities:
+  - slack_notification
+  - channel_messaging
+supported_events:
+  - goal_complete
+  - approval_needed
+  - stall_detected
+  - task_blocked
+description: "Send Motiva events to a Slack channel via webhook"
+config_schema:
+  webhook_url:
+    type: string
+    required: true
+    description: "Slack Incoming Webhook URL"
+  channel:
+    type: string
+    required: false
+    description: "Override channel (optional)"
+  mention_on_critical:
+    type: boolean
+    default: true
+    description: "Mention @channel on critical events"
+entry_point: "dist/index.js"
+min_motiva_version: "0.1.0"
+permissions:
+  network: true
