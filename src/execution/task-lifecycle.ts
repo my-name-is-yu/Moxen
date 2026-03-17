@@ -22,6 +22,8 @@ import {
   verifyTask as _verifyTask,
   handleVerdict as _handleVerdict,
   handleFailure as _handleFailure,
+  type VerdictResult,
+  type FailureResult,
 } from "./task-verifier.js";
 export type {
   ExecutorReport,
