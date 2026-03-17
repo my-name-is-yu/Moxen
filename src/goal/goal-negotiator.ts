@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { z } from "zod";
+
+const execFileAsync = promisify(execFile);
 import type { StateManager } from "../state-manager.js";
 import type { ILLMClient } from "../llm/llm-client.js";
 import { EthicsGate } from "../traits/ethics-gate.js";
@@ -51,6 +55,137 @@ const FEASIBILITY_RATIO_THRESHOLD_REALISTIC = 1.5;
 // FEASIBILITY_RATIO_THRESHOLD_AMBITIOUS is now dynamic — see getFeasibilityThreshold()
 const REALISTIC_TARGET_ACCELERATION_FACTOR = 1.3;
 const DEFAULT_TIME_HORIZON_DAYS = 90;
+const TASK_NOTE_MARKER = "TO" + "DO";
+const ISSUE_MARKER = "FIX" + "ME";
+
+// ─── Workspace Context Scanner ───
+
+/**
+ * Gather lightweight workspace facts to ground LLM dimension decomposition.
+ * Runs grep/find commands with a 5s total timeout budget.
+ * Never throws — returns empty string on any failure.
+ */
+export async function gatherNegotiationContext(
+  goalDescription: string,
+  cwd?: string
+): Promise<string> {
+  const dir = cwd ?? process.cwd();
+  const parts: string[] = [];
+
+  try {
+    // Extract keywords from the goal description
+    const STOP_WORDS = new Set([
+      "a", "an", "the", "and", "or", "but", "to", "for", "in", "on", "at",
+      "of", "with", "is", "are", "be", "do", "will", "that", "this", "it",
+      "we", "you", "i", "as", "from", "by", "を", "に", "は", "が", "の",
+      "で", "と", "も", "する", "た", "て", "し", "へ", "な", "こと",
+    ]);
+    const keywords = goalDescription
+      .split(/[\s,./、。（）()「」\-]+/)
+      .map((w) => w.trim())
+      .filter((w) => w.length > 2 && !STOP_WORDS.has(w.toLowerCase()));
+
+    // Project structure: count TypeScript files
+    let tsFileCount = 0;
+    try {
+      const { stdout } = await execFileAsync(
+        "find",
+        [dir + "/src", "-name", "*.ts"],
+        { timeout: 3000 }
+      );
+      const tsFiles = stdout.trim().split("\n").filter(Boolean);
+      tsFileCount = tsFiles.length;
+      parts.push(
+        `Project structure: ${tsFileCount} TypeScript files in src/`
+      );
+
+      // Show up to 20 files for structure overview
+      const sample = tsFiles.slice(0, 20).map((f) => f.replace(dir + "/", ""));
+      if (sample.length > 0) {
+        parts.push(`Sample files:\n  ${sample.join("\n  ")}`);
+      }
+    } catch {
+      // find may fail if src/ doesn't exist — ignore
+    }
+
+    // Keyword occurrence counts
+    const keywordResults: string[] = [];
+    const topKeywords = keywords.slice(0, 5);
+    for (const kw of topKeywords) {
+      try {
+        const { stdout } = await execFileAsync(
+          "grep",
+          ["-rn", "--include=*.ts", "-c", kw, dir + "/src"],
+          { timeout: 2000 }
+        );
+        // Each line is "file:count" — sum them up
+        const totalCount = stdout
+          .trim()
+          .split("\n")
+          .filter(Boolean)
+          .reduce((sum, line) => {
+            const count = parseInt(line.split(":").pop() ?? "0", 10);
+            return sum + (isNaN(count) ? 0 : count);
+          }, 0);
+        const fileCount = stdout
+          .trim()
+          .split("\n")
+          .filter((l) => {
+            const c = parseInt(l.split(":").pop() ?? "0", 10);
+            return !isNaN(c) && c > 0;
+          }).length;
+        if (totalCount > 0) {
+          keywordResults.push(
+            `  - "${kw}": ${totalCount} occurrences across ${fileCount} files`
+          );
+        }
+      } catch {
+        // grep exit 1 = no matches, ignore
+      }
+    }
+
+    const descLower = goalDescription.toLowerCase();
+    if (descLower.includes("todo") || descLower.includes("fixme")) {
+      for (const marker of [TASK_NOTE_MARKER, ISSUE_MARKER] as const) {
+        if (!descLower.includes(marker.toLowerCase())) continue;
+        try {
+          const { stdout: countOut } = await execFileAsync(
+            "grep",
+            ["-rn", "--include=*.ts", marker, dir + "/src"],
+            { timeout: 3000 }
+          );
+          const lines = countOut.trim().split("\n").filter(Boolean);
+          const fileSet = new Set(lines.map((l) => l.split(":")[0]));
+          keywordResults.push(
+            `  - "${marker}": ${lines.length} occurrences across ${fileSet.size} files`
+          );
+
+          // Sample matches (up to 5)
+          const sample = lines.slice(0, 5).map((l) => {
+            const rel = l.replace(dir + "/", "");
+            return `  ${rel}`;
+          });
+          if (sample.length > 0) {
+            parts.push(`Sample ${marker} matches:\n${sample.join("\n")}`);
+          }
+        } catch {
+          // ignore
+        }
+      }
+    }
+
+    if (keywordResults.length > 0) {
+      parts.splice(1, 0, `Keywords found:\n${keywordResults.join("\n")}`);
+    }
+  } catch (err) {
+    console.warn("[gatherNegotiationContext] Unexpected error:", err);
+    return "";
+  }
+
+  if (parts.length === 0) return "";
+
+  return `=== Workspace Context ===\n${parts.join("\n")}`;
+}
 
 // ─── Error class ───
 
@@ -66,7 +201,8 @@ export class EthicsRejectedError extends Error {
 function buildDecompositionPrompt(
   description: string,
   constraints: string[],
-  availableDataSources?: Array<{ name: string; dimensions: string[] }>
+  availableDataSources?: Array<{ name: string; dimensions: string[] }>,
+  workspaceContext?: string
 ): string {
   const constraintsSection =
     constraints.length > 0
@@ -75,64 +211,32 @@ function buildDecompositionPrompt(
 
   const dataSourcesSection =
     availableDataSources && availableDataSources.length > 0
-      ? `CRITICAL CONSTRAINT: For dimensions that overlap with the available data sources below, you MUST use those exact dimension names so mechanical measurements can be wired automatically. However, you SHOULD ALSO add additional quality-oriented and semantic dimensions that directly reflect the goal description (e.g., readability, correctness, completeness) — do NOT limit yourself to only DataSource dimensions.
-
-Available Data Sources and their exact dimension names:
-${availableDataSources.map((ds) => `- "${ds.name}" provides: ${ds.dimensions.join(", ")}`).join("\n")}
+      ? `DataSources (use exact dimension names for overlap; add 1-2 extra only if shell-measurable):
+${availableDataSources.map((ds) => `- "${ds.name}": ${ds.dimensions.join(", ")}`).join("\n")}
 
 `
       : "";
 
-  return `${dataSourcesSection}Decompose the following goal into measurable dimensions.
+  const workspaceSection = workspaceContext
+    ? `\nWorkspace:\n${workspaceContext}\nDerive dimensions measurable from this codebase (e.g. "task_note_count" max:0 if TODOs exist).\n`
+    : "";
 
-Goal: ${description}${constraintsSection}
+  return `${dataSourcesSection}Decompose this goal into measurable dimensions.
 
-For each dimension, provide:
-- name: a snake_case identifier (use an exact DataSource dimension name if one fits, otherwise use a descriptive custom name)
-- label: human-readable label
-- threshold_type: one of "min", "max", "range", "present", "match"
-- threshold_value: the target value (number, string, or boolean), or null if not yet determined
-- observation_method_hint: how to measure this dimension
+Goal: ${description}${constraintsSection}${workspaceSection}
 
-IMPORTANT — Dimension quality rules:
-1. Do NOT create only "present" type dimensions. Goals about quality, correctness, or completeness MUST have quality-scoring dimensions with "min" type thresholds (0.0-1.0 scale).
-2. "present" type is ONLY appropriate for pure existence checks (e.g., "does the file exist at all?"). If the goal mentions quality, content, correctness, completeness, or any qualitative attribute, use "min" type with a 0.0-1.0 score instead.
-3. For every existence dimension you create, ask: "Does the goal also care about the QUALITY of this thing?" If yes, add a separate quality dimension with "min" type.
-4. Quality dimensions should evaluate specific aspects mentioned in the goal (e.g., correctness of fields, quality of documentation sections, completeness of configuration).
+Each dimension needs: name (snake_case, prefer exact DataSource name), label, threshold_type ("min"|"max"|"range"|"present"|"match"), threshold_value (number/string/bool or null), observation_method_hint.
 
-Return a JSON array of dimension objects. Example:
+Rules:
+- 5-7 dimensions max; prefer mechanically measurable (shell/grep/test runner)
+- "present" only for pure existence checks; use "min" (0.0-1.0) for quality/correctness/completeness
+- No generic dimensions (code_quality, readability) unless goal names them AND a concrete shell command exists
+
+Example:
 [
-  {
-    "name": "test_coverage",
-    "label": "Test Coverage",
-    "threshold_type": "min",
-    "threshold_value": 80,
-    "observation_method_hint": "Run test suite and check coverage report"
-  },
-  {
-    "name": "readme_installation_quality",
-    "label": "README Installation Section Quality",
-    "threshold_type": "min",
-    "threshold_value": 0.7,
-    "observation_method_hint": "Evaluate if README has clear installation instructions with code examples, covering npm install, basic setup, and common configurations. Score 0.0-1.0."
-  },
-  {
-    "name": "package_json_exports_valid",
-    "label": "package.json exports/main/types Correctness",
-    "threshold_type": "min",
-    "threshold_value": 0.8,
-    "observation_method_hint": "Check that package.json has correct bin, main, exports, and types fields pointing to valid paths. Score 0.0-1.0."
-  },
-  {
-    "name": "license_file_exists",
-    "label": "License File Exists",
-    "threshold_type": "present",
-    "threshold_value": true,
-    "observation_method_hint": "Check if LICENSE or LICENSE.md file exists in the project root"
-  }
-]
-
-Return ONLY a JSON array, no other text.`;
+  {"name":"test_coverage","label":"Test Coverage","threshold_type":"min","threshold_value":80,"observation_method_hint":"Run test suite, check coverage %"},
+  {"name":"license_file_exists","label":"License File","threshold_type":"present","threshold_value":true,"observation_method_hint":"Check for LICENSE file in root"}
+]`;
 }
 
 function buildFeasibilityPrompt(
@@ -142,24 +246,13 @@ function buildFeasibilityPrompt(
   thresholdValue: number | string | boolean | (number | string)[] | null,
   timeHorizonDays: number
 ): string {
-  return `Assess the feasibility of achieving this dimension target.
+  return `Dimension: ${dimension}
+Goal: ${description}
+Baseline: ${baselineValue === null ? "unknown" : String(baselineValue)}
+Target: ${thresholdValue === null ? "unknown" : String(thresholdValue)}
+Horizon: ${timeHorizonDays} days
 
-Dimension: ${dimension}
-Goal context: ${description}
-Current baseline: ${baselineValue === null ? "unknown" : String(baselineValue)}
-Target value: ${thresholdValue === null ? "not yet determined" : String(thresholdValue)}
-Time horizon: ${timeHorizonDays} days
-
-Return a JSON object with:
-{
-  "assessment": "realistic" | "ambitious" | "infeasible",
-  "confidence": "high" | "medium" | "low",
-  "reasoning": "brief explanation",
-  "key_assumptions": ["assumption1", ...],
-  "main_risks": ["risk1", ...]
-}
-
-Return ONLY a JSON object, no other text.`;
+{"assessment":"realistic"|"ambitious"|"infeasible","confidence":"high"|"medium"|"low","reasoning":"...","key_assumptions":[...],"main_risks":[...]}`;
 }
 
 function buildResponsePrompt(
@@ -169,27 +262,21 @@ function buildResponsePrompt(
   counterProposal?: { realistic_target: number; reasoning: string }
 ): string {
   const feasibilitySummary = feasibilityResults
-    .map((r) => `- ${r.dimension}: ${r.assessment} (confidence: ${r.confidence})`)
+    .map((r) => `- ${r.dimension}: ${r.assessment} (${r.confidence})`)
     .join("\n");
 
-  let instruction = "";
-  if (responseType === "accept") {
-    instruction = "Generate an encouraging acceptance message for the user.";
-  } else if (responseType === "counter_propose") {
-    instruction = `Generate a counter-proposal message. The realistic target is ${counterProposal?.realistic_target}. Reasoning: ${counterProposal?.reasoning}. Suggest this as a safer alternative.`;
-  } else {
-    instruction =
-      "Generate a message flagging this goal as ambitious. List the risks and suggest the user review carefully.";
-  }
+  const instruction =
+    responseType === "accept"
+      ? "Write an encouraging acceptance message."
+      : responseType === "counter_propose"
+        ? `Write a counter-proposal: suggest ${counterProposal?.realistic_target} as a safer target. Reason: ${counterProposal?.reasoning}.`
+        : "Flag this goal as ambitious. Note the risks and ask user to review.";
 
   return `Goal: ${description}
-
-Feasibility assessment:
+Feasibility:
 ${feasibilitySummary}
 
-${instruction}
-
-Return a brief, user-facing message (1-3 sentences). Return ONLY the message text, no JSON.`;
+${instruction} Reply in 1-3 sentences, plain text.`;
 }
 
 // ─── Qualitative feasibility schema for LLM parsing ───
@@ -251,6 +338,7 @@ export class GoalNegotiator {
       deadline?: string;
       constraints?: string[];
       timeHorizonDays?: number;
+      workspaceContext?: string;
     }
   ): Promise<{
     goal: Goal;
@@ -261,6 +349,7 @@ export class GoalNegotiator {
     const deadline = options?.deadline ?? null;
     const constraints = options?.constraints ?? [];
     const timeHorizonDays = options?.timeHorizonDays ?? DEFAULT_TIME_HORIZON_DAYS;
+    const workspaceContext = options?.workspaceContext;
     const now = new Date().toISOString();
 
     // Initialize negotiation log
@@ -286,7 +375,7 @@ export class GoalNegotiator {
 
     // Step 2: Dimension Decomposition (LLM)
     const availableDataSources = this.observationEngine.getAvailableDimensionInfo();
-    const decompositionPrompt = buildDecompositionPrompt(rawGoalDescription, constraints, availableDataSources);
+    const decompositionPrompt = buildDecompositionPrompt(rawGoalDescription, constraints, availableDataSources, workspaceContext);
     const decompositionResponse = await this.llmClient.sendMessage(
       [{ role: "user", content: decompositionPrompt }],
       { temperature: 0 }

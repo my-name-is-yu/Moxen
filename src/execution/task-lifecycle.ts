@@ -15,6 +15,7 @@ import { TaskSchema, VerificationResultSchema } from "../types/task.js";
 import type { Task, VerificationResult } from "../types/task.js";
 import type { GapVector } from "../types/gap.js";
 import type { DriveContext } from "../types/drive.js";
+import type { Dimension } from "../types/goal.js";
 import type { EthicsGate } from "../traits/ethics-gate.js";
 import type { CapabilityDetector } from "../observation/capability-detector.js";
 import type { CapabilityAcquisitionTask } from "../types/capability.js";
@@ -22,6 +23,8 @@ import {
   verifyTask as _verifyTask,
   handleVerdict as _handleVerdict,
   handleFailure as _handleFailure,
+  type VerdictResult,
+  type FailureResult,
 } from "./task-verifier.js";
 export type {
   ExecutorReport,
@@ -146,14 +149,33 @@ export class TaskLifecycle {
   // ─── selectTargetDimension ───
 
   /**
-   * Select the highest-priority dimension to work on based on drive scoring.
+   * Confidence-tier weights for dimension selection.
+   * Mechanically-observable dimensions are prioritized over LLM-only ones.
+   */
+  private static readonly CONFIDENCE_WEIGHTS: Record<string, number> = {
+    mechanical: 1.0,
+    verified: 0.9,
+    independent_review: 0.7,
+    self_report: 0.3,
+  };
+
+  private static getConfidenceWeight(dim: Dimension): number {
+    const tier = dim.observation_method.confidence_tier;
+    return TaskLifecycle.CONFIDENCE_WEIGHTS[tier] ?? 0.3;
+  }
+
+  /**
+   * Select the highest-priority dimension to work on based on drive scoring,
+   * weighted by observation confidence tier so that mechanically-observable
+   * dimensions are preferred over LLM-only ones at equal gap severity.
    *
    * @param gapVector - current gap state for the goal
    * @param driveContext - per-dimension timing/deadline/opportunity context
+   * @param dimensions - optional goal dimensions used to apply confidence-tier weighting
    * @returns the name of the top-ranked dimension
    * @throws if gapVector has no gaps (empty)
    */
-  selectTargetDimension(gapVector: GapVector, driveContext: DriveContext): string {
+  selectTargetDimension(gapVector: GapVector, driveContext: DriveContext, dimensions?: Dimension[]): string {
     if (gapVector.gaps.length === 0) {
       throw new Error("selectTargetDimension: gapVector has no gaps (empty gap vector)");
     }
@@ -161,8 +183,26 @@ export class TaskLifecycle {
     const scores = scoreAllDimensions(gapVector, driveContext);
     const ranked = rankDimensions(scores);
 
-    // ranked is sorted descending by final_score; take the top one
-    return ranked[0]!.dimension_name;
+    if (!dimensions || dimensions.length === 0) {
+      // No dimension metadata available — fall back to drive-score ranking only
+      return ranked[0]!.dimension_name;
+    }
+
+    // Build a lookup from dimension name → confidence weight
+    const weightByName = new Map<string, number>();
+    for (const dim of dimensions) {
+      weightByName.set(dim.name, TaskLifecycle.getConfidenceWeight(dim));
+    }
+
+    // Apply confidence-tier weighting to final_score for selection only
+    const weighted = ranked.map((score) => ({
+      dimension_name: score.dimension_name,
+      weighted_score: score.final_score * (weightByName.get(score.dimension_name) ?? 0.3),
+    }));
+
+    weighted.sort((a, b) => b.weighted_score - a.weighted_score);
+
+    return weighted[0]!.dimension_name;
   }
 
   // ─── generateTask ───
@@ -271,7 +311,7 @@ export class TaskLifecycle {
    * Creates a session, builds context, converts to AgentTask, executes
    * via adapter, ends session, and updates task status based on result.
    */
-  async executeTask(task: Task, adapter: IAdapter): Promise<AgentResult> {
+  async executeTask(task: Task, adapter: IAdapter, workspaceContext?: string): Promise<AgentResult> {
     // Create execution session
     const session = this.sessionManager.createSession(
       "task_execution",
@@ -297,7 +337,17 @@ export class TaskLifecycle {
       prompt = `\`\`\`github-issue\n${issuePayload}\n\`\`\``;
     } else {
       // Build prompt with task description as primary content
-      const taskDescription = `You are an AI agent executing a task.\n\nTask: ${task.work_description}\n\nApproach: ${task.approach}\n\nSuccess Criteria:\n${task.success_criteria.map((c) => `- ${c.description}`).join("\n")}`;
+      const scopeConstraints =
+        `\n\nSCOPE CONSTRAINTS (CRITICAL — violations will cause task failure):\n` +
+        `- ONLY modify source files directly related to the task\n` +
+        `- Do NOT modify: test files (*test*, *spec*), config files (*.config.*, package.json, tsconfig.json), CI/CD files\n` +
+        `- Do NOT change function visibility (private→export), file structure, or imports in unrelated files\n` +
+        `- Do NOT modify build configuration or dependency files\n` +
+        `- If a file contains the target pattern inside a string literal or template, leave it as-is`;
+      const contextSection = workspaceContext
+        ? `\n\nWORKSPACE CONTEXT (use these specific locations):\n${workspaceContext}`
+        : "";
+      const taskDescription = `You are an AI agent executing a task.\n\nTask: ${task.work_description}\n\nApproach: ${task.approach}\n\nSuccess Criteria:\n${task.success_criteria.map((c) => `- ${c.description}`).join("\n")}${scopeConstraints}${contextSection}`;
 
       const contextContent = contextSlots
         .filter((slot) => slot.content.trim().length > 0) // Skip empty slots
@@ -361,6 +411,45 @@ export class TaskLifecycle {
         elapsed_ms: 0,
         stopped_reason: "error",
       };
+    }
+
+    // Post-execution scope check: revert changes to protected files
+    if (result.success) {
+      try {
+        const diffOutput = this.execFileSyncFn("git", ["diff", "--name-only"], {
+          cwd: process.cwd(),
+          encoding: "utf-8",
+        }).trim();
+
+        if (diffOutput) {
+          const changedFiles = diffOutput.split("\n");
+          const protectedPatterns = [
+            /\.test\./,
+            /\.spec\./,
+            /vitest\.config/,
+            /jest\.config/,
+            /tsconfig/,
+            /package\.json$/,
+            /package-lock\.json$/,
+            /\.config\.(ts|js|mjs)$/,
+          ];
+
+          const protectedChanges = changedFiles.filter((f) =>
+            protectedPatterns.some((p) => p.test(f))
+          );
+
+          if (protectedChanges.length > 0) {
+            this.execFileSyncFn("git", ["checkout", "--", ...protectedChanges], {
+              cwd: process.cwd(),
+              encoding: "utf-8",
+            });
+            result.output = (result.output || "") +
+              `\n[Scope Check] Reverted ${protectedChanges.length} protected file(s): ${protectedChanges.join(", ")}`;
+          }
+        }
+      } catch {
+        // Non-fatal: scope check failure should not break execution
+      }
     }
 
     // Post-execution: check whether any files were actually modified via git diff --stat.
@@ -477,8 +566,15 @@ export class TaskLifecycle {
     existingTasks?: string[],
     workspaceContext?: string
   ): Promise<TaskCycleResult> {
-    // 1. Select target dimension
-    const targetDimension = this.selectTargetDimension(gapVector, driveContext);
+    // 1. Select target dimension (with confidence-tier weighting when available)
+    let goalDimensions: Dimension[] | undefined;
+    try {
+      const goal = this.stateManager.loadGoal(goalId);
+      goalDimensions = goal?.dimensions ?? undefined;
+    } catch {
+      // If goal load fails, fall back to unweighted selection
+    }
+    const targetDimension = this.selectTargetDimension(gapVector, driveContext, goalDimensions);
 
     // 2. Generate task (optionally with injected knowledge context)
     const task = await this.generateTask(goalId, targetDimension, undefined, knowledgeContext, adapter.adapterType, existingTasks, workspaceContext);
@@ -602,7 +698,7 @@ export class TaskLifecycle {
 
     // 4. Execute task
     if (DEBUG) console.log(`[DEBUG-TL] Executing task ${task.id} via adapter ${adapter.adapterType}`);
-    const executionResult = await this.executeTask(task, adapter);
+    const executionResult = await this.executeTask(task, adapter, workspaceContext);
     if (DEBUG) console.log(`[DEBUG-TL] Execution result: success=${executionResult.success}, stopped=${executionResult.stopped_reason}, error=${executionResult.error}, output=${executionResult.output?.substring(0, 200)}`);
 
     // 4b. Post-execution health check (opt-in)

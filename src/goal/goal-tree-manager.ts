@@ -41,7 +41,7 @@ const SpecificityResponseSchema = z.object({
 });
 
 const SubgoalItemSchema = z.object({
-  hypothesis: z.string(),
+  hypothesis: z.string().default(""),
   dimensions: z
     .array(
       z.object({
@@ -80,20 +80,16 @@ function buildSpecificityPrompt(goal: Goal): string {
     goal.constraints.length > 0
       ? `\nConstraints: ${goal.constraints.join(", ")}`
       : "";
-  return `Evaluate the specificity of this goal. A high specificity score (>= 0.7) means the goal is already a single, atomic task with no meaningful sub-components that could be worked on independently. A low score (< 0.7) means it has multiple distinct aspects that should be broken down into separate subgoals.
+  return `Score goal specificity (0=abstract, 1=atomic).
+>=0.7: single atomic task, no meaningful sub-components.
+<0.7: has distinct aspects requiring subgoals.
 
-Goal title: ${goal.title}
-Goal description: ${goal.description}
-Dimensions: ${dimNames || "(none defined)"}${constraintLines}
-Current decomposition depth: ${goal.decomposition_depth}
+Title: ${goal.title}
+Description: ${goal.description}
+Dimensions: ${dimNames || "(none)"}${constraintLines}
+Depth: ${goal.decomposition_depth}
 
-Output JSON:
-{
-  "specificity_score": <number 0.0 to 1.0>,
-  "reasoning": "<brief explanation>"
-}
-
-Return ONLY the JSON object, no other text.`;
+Return ONLY: {"specificity_score":<0.0-1.0>,"reasoning":"<brief>"}`;
 }
 
 function buildSubgoalPrompt(
@@ -104,85 +100,65 @@ function buildSubgoalPrompt(
 ): string {
   const constraintLines =
     goal.constraints.length > 0
-      ? `Constraints:\n${goal.constraints.map((c) => `- ${c}`).join("\n")}`
-      : "Constraints: none";
+      ? `Constraints: ${goal.constraints.join("; ")}`
+      : "";
 
   const dimLines =
     goal.dimensions.length > 0
-      ? `Existing dimensions:\n${goal.dimensions.map((d) => `- ${d.name}: ${d.label}`).join("\n")}`
-      : "Existing dimensions: none";
+      ? `Dimensions: ${goal.dimensions.map((d) => `${d.name}(${d.label})`).join(", ")}`
+      : "";
 
-  return `Decompose this goal into ${maxChildren} or fewer concrete subgoals. Each subgoal should address a distinct aspect of the parent goal and be more specific.
+  return `Decompose into <=${maxChildren} concrete subgoals, each covering a distinct aspect.
 
-Parent goal: ${goal.title}
+Parent: ${goal.title}
 Description: ${goal.description}
 ${dimLines}
 ${constraintLines}
-Current depth: ${depth} (max allowed depth: ${maxDepth})
-Remaining decomposition levels: ${maxDepth - depth}
+Depth: ${depth}/${maxDepth}
 
-For each subgoal, provide:
-- hypothesis: what this subgoal achieves (1-2 sentences)
-- dimensions: array of measurable dimensions with fields:
-    - name: string (snake_case identifier)
-    - label: string (human-readable)
-    - threshold_type: MUST be one of "min" | "max" | "range" | "present" | "match" (no other values allowed)
-    - threshold_value: number or string or boolean or null
-    - observation_method_hint: string (optional)
-- constraints: array of constraints specific to this subgoal
-- expected_specificity: estimated specificity score after decomposition (0.0-1.0)
+Return a JSON array. Each item:
+- "hypothesis": string — what this subgoal achieves (1-2 sentences)
+- "dimensions": array of {name,label,threshold_type,threshold_value,observation_method_hint}
+  - threshold_type: "min"|"max"|"range"|"present"|"match" only
+- "constraints": string[]
+- "expected_specificity": 0.0-1.0
 
-Output JSON array of subgoal objects. Maximum ${maxChildren} items.
-Return ONLY a JSON array, no other text.`;
+Example (1 item):
+[{"hypothesis":"Improve test coverage for auth module","dimensions":[{"name":"coverage_pct","label":"Coverage %","threshold_type":"min","threshold_value":80,"observation_method_hint":"jest --coverage"}],"constraints":[],"expected_specificity":0.85}]
+
+Return ONLY the JSON array.`;
 }
 
 function buildCoveragePrompt(parent: Goal, children: Goal[]): string {
   const parentDims = parent.dimensions.map((d) => d.name).join(", ");
   const childSummaries = children
-    .map((c, i) => `  ${i + 1}. "${c.title}": dimensions=[${c.dimensions.map((d) => d.name).join(", ")}]`)
+    .map((c, i) => `${i + 1}. "${c.title}": [${c.dimensions.map((d) => d.name).join(",")}]`)
     .join("\n");
 
-  return `Do these subgoals collectively cover all dimensions of the parent goal?
+  return `Do these subgoals cover all parent dimensions?
 
-Parent goal: ${parent.title}
-Parent dimensions: ${parentDims || "(none)"}
-
+Parent: ${parent.title}
+Dimensions: ${parentDims || "(none)"}
 Subgoals:
 ${childSummaries}
 
-Output JSON:
-{
-  "covers_parent": <true|false>,
-  "missing_dimensions": ["<dim1>", ...],
-  "reasoning": "<brief explanation>"
-}
-
-Return ONLY the JSON object, no other text.`;
+Return ONLY: {"covers_parent":<true|false>,"missing_dimensions":[],"reasoning":"<brief>"}`;
 }
 
 function buildRestructurePrompt(rootId: string, treeState: GoalTreeState, goals: Goal[]): string {
   const goalSummaries = goals
-    .map((g) => `  - id="${g.id}" title="${g.title}" depth=${g.decomposition_depth} status=${g.status}`)
+    .map((g) => `${g.id} "${g.title}" d=${g.decomposition_depth} ${g.status}`)
     .join("\n");
 
-  return `Suggest restructuring actions for this goal tree to improve efficiency.
+  return `Suggest restructuring actions to improve this goal tree.
 
-Root goal ID: ${rootId}
-Total nodes: ${treeState.total_nodes}
-Max depth reached: ${treeState.max_depth_reached}
-Active loops: ${treeState.active_loops.length}
-Pruned nodes: ${treeState.pruned_nodes.length}
+Root: ${rootId} | nodes=${treeState.total_nodes} depth=${treeState.max_depth_reached} active=${treeState.active_loops.length} pruned=${treeState.pruned_nodes.length}
 
-Goals in tree:
+Goals:
 ${goalSummaries}
 
-Suggest restructuring actions. Each action should specify:
-- action: "move" | "merge" | "split" | "reorder"
-- goal_ids: array of goal IDs involved
-- reasoning: why this restructuring would help
-
-Output JSON array. Return empty array [] if no restructuring needed.
-Return ONLY a JSON array, no other text.`;
+Each action: {"action":"move"|"merge"|"split"|"reorder","goal_ids":[],"reasoning":"<why>"}
+Return ONLY a JSON array ([] if none needed).`;
 }
 
 // ─── Helper: Build a Goal from subgoal spec ───
@@ -461,7 +437,7 @@ export class GoalTreeManager {
       };
       const VALID_TYPES = new Set(["min", "max", "range", "present", "match"]);
       const rawContent = subgoalResponse.content;
-      const sanitized = rawContent.replace(
+      let sanitized = rawContent.replace(
         /"threshold_type"\s*:\s*"([^"]+)"/g,
         (_match: string, val: string) => {
           if (VALID_TYPES.has(val)) return `"threshold_type": "${val}"`;
@@ -469,18 +445,52 @@ export class GoalTreeManager {
           return `"threshold_type": "${mapped}"`;
         }
       );
+      // Sanitize hypothesis field: LLMs may use "title", "description", "goal", etc.
+      let preprocessed: unknown;
+      try {
+        preprocessed = JSON.parse(sanitized);
+      } catch {
+        preprocessed = null;
+      }
+      if (Array.isArray(preprocessed)) {
+        for (const item of preprocessed) {
+          if (item && typeof item === 'object' && !('hypothesis' in item)) {
+            console.warn('[GoalTreeManager] Subgoal item missing hypothesis. Keys:', Object.keys(item as object));
+            const alt = (item as Record<string, unknown>).title
+              ?? (item as Record<string, unknown>).description
+              ?? (item as Record<string, unknown>).goal
+              ?? (item as Record<string, unknown>).objective
+              ?? (item as Record<string, unknown>).name
+              ?? (item as Record<string, unknown>).text
+              ?? (item as Record<string, unknown>).summary
+              ?? (item as Record<string, unknown>).label
+              ?? 'Unnamed subgoal';
+            (item as Record<string, unknown>).hypothesis = String(alt);
+          }
+        }
+        sanitized = JSON.stringify(preprocessed);
+      }
       const parsed = this.llmClient.parseJSON(
         sanitized,
         SubgoalsResponseSchema
       );
-      subgoalSpecs = parsed.map((sg: (typeof parsed)[number]) => ({
-        ...sg,
-        dimensions: (sg.dimensions ?? []).map((d) => ({
-          ...d,
-          observation_method_hint: d.observation_method_hint ?? "",
-        })),
-        constraints: sg.constraints ?? [],
-      }));
+      subgoalSpecs = parsed.map((sg: (typeof parsed)[number]) => {
+        // Derive hypothesis from dimensions or parent goal title when the LLM omitted it
+        let hypothesis = sg.hypothesis;
+        if (!hypothesis) {
+          const firstDimLabel = sg.dimensions?.[0]?.label;
+          hypothesis = firstDimLabel ? firstDimLabel : goal.title;
+        }
+        return {
+          ...sg,
+          hypothesis,
+          dimensions: (sg.dimensions ?? []).map((d) => ({
+            ...d,
+            observation_method_hint: d.observation_method_hint ?? "",
+          })),
+          constraints: sg.constraints ?? [],
+        };
+      });
       // Clamp to max_children_per_node
       subgoalSpecs = subgoalSpecs.slice(0, maxChildren);
     } catch (err) {
