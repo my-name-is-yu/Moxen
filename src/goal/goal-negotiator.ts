@@ -28,6 +28,18 @@ import type {
   DecompositionResult,
 } from "../types/goal-tree.js";
 import type { CapabilityDetector } from "../observation/capability-detector.js";
+import {
+  decompositionToDimension,
+  deduplicateDimensionKeys,
+  findBestDimensionMatch,
+} from "./goal-validation.js";
+import {
+  suggestGoals as suggestGoalsImpl,
+  filterSuggestions as filterSuggestionsImpl,
+  buildCapabilityCheckPrompt,
+  CapabilityCheckResultSchema,
+} from "./goal-suggest.js";
+export type { GoalSuggestion } from "./goal-suggest.js";
 
 // ─── Constants ───
 
@@ -176,82 +188,6 @@ ${instruction}
 Return a brief, user-facing message (1-3 sentences). Return ONLY the message text, no JSON.`;
 }
 
-function buildSuggestGoalsPrompt(
-  context: string,
-  maxSuggestions: number,
-  existingGoals: string[]
-): string {
-  const existingGoalsSection =
-    existingGoals.length > 0
-      ? `\nExisting goals (do NOT suggest duplicates):\n${existingGoals.map((g) => `- ${g}`).join("\n")}`
-      : "";
-
-  return `You are a goal advisor for a software project. Given the project context below, suggest concrete, measurable improvement goals.
-
-Each goal should:
-1. Be specific and achievable (not vague like "improve code quality")
-2. Have clear success criteria that can be measured
-3. Include 2-4 dimension hints (what to measure)
-4. Be independent of other suggestions
-
-Context:
-${context}${existingGoalsSection}
-
-Return a JSON array of up to ${maxSuggestions} suggestions:
-[
-  {
-    "title": "Short descriptive title",
-    "description": "Detailed description suitable for goal negotiation",
-    "rationale": "Why this goal matters",
-    "dimensions_hint": ["dimension_name_1", "dimension_name_2"]
-  }
-]
-
-Return ONLY a JSON array, no other text.`;
-}
-
-function buildCapabilityCheckPrompt(
-  goalDescription: string,
-  dimensions: DimensionDecomposition[],
-  adapterCapabilities: Array<{ adapterType: string; capabilities: string[] }>
-): string {
-  const dimensionsList = dimensions
-    .map((d) => `- ${d.name}: ${d.label} (threshold_type: ${d.threshold_type}, observation_hint: ${d.observation_method_hint})`)
-    .join("\n");
-
-  const capabilitiesList = adapterCapabilities
-    .map((ac) => `- ${ac.adapterType}: ${ac.capabilities.join(", ")}`)
-    .join("\n");
-
-  return `You are assessing whether an agent can achieve each dimension of a goal given its available capabilities.
-
-Goal: ${goalDescription}
-
-Dimensions to achieve:
-${dimensionsList}
-
-Available adapter capabilities:
-${capabilitiesList}
-
-For each dimension that requires a capability NOT available in the listed adapters, report it as a gap.
-Also indicate whether the missing capability is acquirable (i.e., can the agent learn or install it during execution).
-
-Return a JSON object:
-{
-  "gaps": [
-    {
-      "dimension": "dimension_name",
-      "required_capability": "capability_name",
-      "acquirable": false,
-      "reason": "brief explanation why this capability is missing and whether it can be acquired"
-    }
-  ]
-}
-
-If all dimensions can be achieved with the available capabilities, return { "gaps": [] }.
-Return ONLY a JSON object, no other text.`;
-}
-
 function buildSubgoalDecompositionPrompt(parentGoal: Goal): string {
   const dimensionsList = parentGoal.dimensions
     .map((d) => `- ${d.label} (${d.name}): target=${JSON.stringify(d.threshold)}`)
@@ -289,30 +225,6 @@ Return a JSON array of subgoal objects:
 Return ONLY a JSON array, no other text.`;
 }
 
-// ─── Goal Suggestion schemas ───
-
-const GoalSuggestionSchema = z.object({
-  title: z.string(),
-  description: z.string(),
-  rationale: z.string(),
-  dimensions_hint: z.array(z.string()),
-});
-
-const GoalSuggestionListSchema = z.array(GoalSuggestionSchema);
-
-export type GoalSuggestion = z.infer<typeof GoalSuggestionSchema>;
-
-// ─── Capability check schema for LLM parsing ───
-
-const CapabilityCheckResultSchema = z.object({
-  gaps: z.array(z.object({
-    dimension: z.string(),
-    required_capability: z.string(),
-    acquirable: z.boolean(),
-    reason: z.string(),
-  })),
-});
-
 // ─── Subgoal schema for LLM parsing ───
 
 const SubgoalLLMSchema = z.object({
@@ -332,83 +244,6 @@ const QualitativeFeasibilitySchema = z.object({
   key_assumptions: z.array(z.string()),
   main_risks: z.array(z.string()),
 });
-
-// ─── Helper: convert DimensionDecomposition to Dimension ───
-
-function decompositionToDimension(d: DimensionDecomposition): Dimension {
-  const threshold = buildThreshold(d.threshold_type, d.threshold_value);
-  return {
-    name: d.name,
-    label: d.label,
-    current_value: null,
-    threshold,
-    confidence: 0,
-    observation_method: {
-      type: "llm_review",
-      source: d.observation_method_hint,
-      schedule: null,
-      endpoint: null,
-      confidence_tier: "self_report",
-    },
-    last_updated: null,
-    history: [],
-    weight: 1.0,
-    uncertainty_weight: null,
-    state_integrity: "ok",
-    dimension_mapping: null,
-  };
-}
-
-function buildThreshold(
-  thresholdType: "min" | "max" | "range" | "present" | "match",
-  thresholdValue: number | string | boolean | (number | string)[] | null
-): Dimension["threshold"] {
-  switch (thresholdType) {
-    case "min":
-      return { type: "min", value: typeof thresholdValue === "number" ? thresholdValue : 0 };
-    case "max":
-      return { type: "max", value: typeof thresholdValue === "number" ? thresholdValue : 100 };
-    case "range": {
-      if (Array.isArray(thresholdValue)) {
-        const low = typeof thresholdValue[0] === "number" ? thresholdValue[0] : 0;
-        const high = typeof thresholdValue[1] === "number" ? thresholdValue[1] : 100;
-        return { type: "range", low, high };
-      }
-      return { type: "range", low: 0, high: typeof thresholdValue === "number" ? thresholdValue : 100 };
-    }
-    case "present":
-      return { type: "present" };
-    case "match":
-      return {
-        type: "match",
-        value:
-          thresholdValue !== null && !Array.isArray(thresholdValue)
-            ? (thresholdValue as string | number | boolean)
-            : "",
-      };
-  }
-}
-
-// ─── Helper: deduplicate dimension keys ───
-
-/**
- * When the LLM returns multiple dimensions with the same `name` (key),
- * append `_2`, `_3`, … suffixes to the duplicates so every key is unique.
- * All dimensions are preserved — none are dropped.
- */
-function deduplicateDimensionKeys(dimensions: DimensionDecomposition[]): DimensionDecomposition[] {
-  const seen = new Map<string, number>(); // key → count so far
-  for (const dim of dimensions) {
-    const base = dim.name;
-    const count = seen.get(base) ?? 0;
-    seen.set(base, count + 1);
-    if (count > 0) {
-      // Second occurrence → `_2`, third → `_3`, etc.
-      dim.name = `${base}_${count + 1}`;
-    }
-  }
-  return dimensions;
-}
 
 // ─── GoalNegotiator ───
 
@@ -1128,100 +963,14 @@ export class GoalNegotiator {
       repoPath?: string;
       capabilityDetector?: CapabilityDetector;
     }
-  ): Promise<GoalSuggestion[]> {
-    const maxSuggestions = options?.maxSuggestions ?? 5;
-    const existingGoals = options?.existingGoals ?? [];
-
-    if (!context || context.trim().length === 0) {
-      return [];
-    }
-
-    const prompt = buildSuggestGoalsPrompt(context, maxSuggestions, existingGoals);
-
-    let rawContent: string;
-    try {
-      const response = await this.llmClient.sendMessage(
-        [{ role: "user", content: prompt }],
-        { temperature: 0.3 }
-      );
-      rawContent = response.content;
-    } catch {
-      return [];
-    }
-
-    let suggestions: GoalSuggestion[];
-    try {
-      suggestions = this.llmClient.parseJSON(rawContent, GoalSuggestionListSchema);
-    } catch {
-      return [];
-    }
-
-    // Apply ethics filtering — remove rejected suggestions
-    const ethicsFiltered: GoalSuggestion[] = [];
-    for (const suggestion of suggestions) {
-      try {
-        const verdict = await this.ethicsGate.check(
-          "goal",
-          randomUUID(),
-          suggestion.description
-        );
-        if (verdict.verdict === "reject") {
-          continue;
-        }
-        ethicsFiltered.push(suggestion);
-      } catch {
-        // Non-critical: if ethics check fails, include the suggestion
-        ethicsFiltered.push(suggestion);
-      }
-    }
-
-    return await this.filterSuggestions(
-      ethicsFiltered,
-      options?.existingGoals || [],
-      options?.capabilityDetector,
+  ): Promise<import("./goal-suggest.js").GoalSuggestion[]> {
+    return suggestGoalsImpl(
+      context,
+      this.llmClient,
+      this.ethicsGate,
+      this.adapterCapabilities,
+      options,
     );
-  }
-
-  private async filterSuggestions(
-    suggestions: GoalSuggestion[],
-    existingGoals: string[],
-    capabilityDetector?: CapabilityDetector,
-  ): Promise<GoalSuggestion[]> {
-    const filtered: GoalSuggestion[] = [];
-
-    for (const suggestion of suggestions) {
-      // 1. Dedup: skip if similar to existing goal (case-insensitive substring match)
-      const isDuplicate = existingGoals.some(existing => {
-        const existingLower = existing.toLowerCase();
-        const titleLower = suggestion.title.toLowerCase();
-        return existingLower.includes(titleLower) || titleLower.includes(existingLower);
-      });
-      if (isDuplicate) {
-        console.log(`[GoalNegotiator] Filtered duplicate suggestion: "${suggestion.title}"`);
-        continue;
-      }
-
-      // 2. Feasibility check via CapabilityDetector (if available)
-      if (capabilityDetector) {
-        try {
-          const gap = await capabilityDetector.detectGoalCapabilityGap(
-            suggestion.description,
-            this.adapterCapabilities?.map(a => a.capabilities).flat() || []
-          );
-          if (gap && !gap.acquirable) {
-            console.log(`[GoalNegotiator] Filtered infeasible suggestion: "${suggestion.title}" — ${gap.gap.reason}`);
-            continue;
-          }
-        } catch (err) {
-          // Non-blocking: if capability check fails, keep the suggestion
-          console.warn(`[GoalNegotiator] Capability check failed for "${suggestion.title}": ${err}`);
-        }
-      }
-
-      filtered.push(suggestion);
-    }
-
-    return filtered;
   }
 
   // ─── getNegotiationLog() ───
@@ -1420,27 +1169,4 @@ export class GoalNegotiator {
   ): number {
     return baseline + changeRate * timeHorizonDays * REALISTIC_TARGET_ACCELERATION_FACTOR;
   }
-}
-
-/**
- * Find the best matching DataSource dimension name for a given dimension name.
- * Uses simple keyword overlap matching.
- */
-function findBestDimensionMatch(name: string, candidates: string[]): string | null {
-  const nameTokens = name.toLowerCase().split(/[_\s-]+/);
-  let bestMatch: string | null = null;
-  let bestScore = 0;
-
-  for (const candidate of candidates) {
-    const candidateTokens = candidate.toLowerCase().split(/[_\s-]+/);
-    // Count overlapping tokens
-    const overlap = nameTokens.filter(t => candidateTokens.includes(t)).length;
-    const score = overlap / Math.max(nameTokens.length, candidateTokens.length);
-    if (score > bestScore && score >= 0.6) {  // At least 60% token overlap
-      bestScore = score;
-      bestMatch = candidate;
-    }
-  }
-
-  return bestMatch;
 }

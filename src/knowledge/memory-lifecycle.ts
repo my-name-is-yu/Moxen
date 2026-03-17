@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { z } from "zod";
@@ -8,90 +7,46 @@ import type { VectorIndex } from "./vector-index.js";
 import {
   ShortTermEntrySchema,
   LessonEntrySchema,
-  StatisticalSummarySchema,
-  MemoryIndexSchema,
   RetentionConfigSchema,
+  StatisticalSummarySchema,
 } from "../types/memory-lifecycle.js";
 import type {
   ShortTermEntry,
   LessonEntry,
   StatisticalSummary,
   MemoryIndex,
-  MemoryIndexEntry,
   CompressionResult,
   RetentionConfig,
   MemoryDataType,
 } from "../types/memory-lifecycle.js";
-
-// ─── DriveScorer interface ───
-
-/**
- * Minimal interface for drive-based memory management.
- * Allows MemoryLifecycleManager to query dissatisfaction scores
- * without depending on the full DriveScorer module.
- */
-export interface IDriveScorer {
-  /**
-   * Returns a dissatisfaction score [0, 1+] for a dimension.
-   * Used to determine compression delays.
-   */
-  getDissatisfactionScore(dimension: string): number;
-}
-
-/**
- * DriveScoreAdapter adapts DriveScore[] output from DriveScorer
- * to the IDriveScorer interface expected by MemoryLifecycleManager.
- *
- * Usage:
- *   const adapter = new DriveScoreAdapter();
- *   // After each drive scoring step in CoreLoop:
- *   adapter.update(driveScores);
- *   // MemoryLifecycleManager reads via getDissatisfactionScore()
- */
-export class DriveScoreAdapter implements IDriveScorer {
-  private readonly scores: Map<string, number> = new Map();
-
-  /**
-   * Replace the stored drive scores with the latest batch.
-   * Each entry must have a dimension_name and dissatisfaction score.
-   */
-  update(driveScores: Array<{ dimension_name: string; dissatisfaction: number }>): void {
-    this.scores.clear();
-    for (const s of driveScores) {
-      this.scores.set(s.dimension_name, s.dissatisfaction);
-    }
-  }
-
-  /**
-   * Returns the stored dissatisfaction score for the given dimension.
-   * Returns 0 if the dimension is unknown (safe default: no delay inflation).
-   */
-  getDissatisfactionScore(dimension: string): number {
-    return this.scores.get(dimension) ?? 0;
-  }
-}
-
-// ─── LLM response schemas ───
-
-const PatternExtractionResponseSchema = z.object({
-  patterns: z.array(z.string()),
-});
-
-const LessonDistillationResponseSchema = z.object({
-  lessons: z.array(
-    z.object({
-      type: z.enum(["strategy_outcome", "success_pattern", "failure_pattern"]),
-      context: z.string(),
-      action: z.string().optional(),
-      outcome: z.string().optional(),
-      lesson: z.string(),
-      relevance_tags: z.array(z.string()).default([]),
-      failure_reason: z.string().optional(),
-      avoidance_hint: z.string().optional(),
-      applicability: z.string().optional(),
-    })
-  ),
-});
+import type { IDriveScorer } from "./drive-score-adapter.js";
+export type { IDriveScorer } from "./drive-score-adapter.js";
+export { DriveScoreAdapter } from "./drive-score-adapter.js";
+import {
+  atomicWrite,
+  readJsonFile,
+  getDataFile,
+  generateId,
+  getDirectorySize,
+  getRetentionLimit,
+} from "./memory-persistence.js";
+import {
+  initializeIndex,
+  loadIndex,
+  saveIndex,
+  updateIndex,
+  removeFromIndex,
+  removeGoalFromIndex,
+  touchIndexEntry,
+  archiveOldestLongTermEntries,
+  storeLessonsLongTerm,
+  updateStatistics,
+  queryLessons,
+  queryCrossGoalLessons,
+  extractPatterns,
+  distillLessons,
+  validateCompressionQuality,
+} from "./memory-phases.js";
 
 // ─── MemoryLifecycleManager ───
 
@@ -155,8 +110,8 @@ export class MemoryLifecycleManager {
       fs.mkdirSync(dir, { recursive: true });
     }
     // Initialize index files if they don't exist
-    this.initializeIndex("short-term");
-    this.initializeIndex("long-term");
+    initializeIndex(this.memoryDir, "short-term");
+    initializeIndex(this.memoryDir, "long-term");
     // Initialize global lessons file
     const globalPath = path.join(
       this.memoryDir,
@@ -165,7 +120,7 @@ export class MemoryLifecycleManager {
       "global.json"
     );
     if (!fs.existsSync(globalPath)) {
-      this.atomicWrite(globalPath, []);
+      atomicWrite(globalPath, []);
     }
   }
 
@@ -196,7 +151,7 @@ export class MemoryLifecycleManager {
 
     const now = new Date().toISOString();
     const entry = ShortTermEntrySchema.parse({
-      id: this.generateId("st"),
+      id: generateId("st"),
       goal_id: goalId,
       data_type: dataType,
       loop_number: options?.loopNumber ?? 0,
@@ -207,18 +162,18 @@ export class MemoryLifecycleManager {
     });
 
     // Append to appropriate file
-    const dataFile = this.getDataFile(goalId, dataType);
-    const existing = this.readJsonFile<ShortTermEntry[]>(
+    const dataFile = getDataFile(this.memoryDir, goalId, dataType);
+    const existing = readJsonFile<ShortTermEntry[]>(
       dataFile,
       z.array(ShortTermEntrySchema)
     );
     const entries = existing ?? [];
     entries.push(entry);
-    this.atomicWrite(dataFile, entries);
+    atomicWrite(dataFile, entries);
 
     // Update short-term index
-    this.updateIndex("short-term", {
-      id: this.generateId("idx"),
+    updateIndex(this.memoryDir, "short-term", {
+      id: generateId("idx"),
       goal_id: goalId,
       dimensions: entry.dimensions,
       tags: entry.tags,
@@ -260,15 +215,15 @@ export class MemoryLifecycleManager {
     dataType: MemoryDataType
   ): Promise<CompressionResult> {
     const now = new Date().toISOString();
-    const dataFile = this.getDataFile(goalId, dataType);
+    const dataFile = getDataFile(this.memoryDir, goalId, dataType);
     const allEntries =
-      this.readJsonFile<ShortTermEntry[]>(
+      readJsonFile<ShortTermEntry[]>(
         dataFile,
         z.array(ShortTermEntrySchema)
       ) ?? [];
 
     // Determine the retention limit for this goal
-    const retentionLimit = this.getRetentionLimit(goalId);
+    const retentionLimit = getRetentionLimit(this.config, goalId);
 
     // Find entries eligible for compression (loop_number exceeds retention limit)
     const maxLoopNumber = allEntries.reduce(
@@ -309,17 +264,17 @@ export class MemoryLifecycleManager {
 
     try {
       // Step 1: Extract patterns from entries
-      const patterns = await this.extractPatterns(expiredEntries);
+      const patterns = await extractPatterns(this.llmClient, expiredEntries);
 
       // Step 2: Distill lessons from patterns
-      const rawLessons = await this.distillLessons(patterns, expiredEntries);
+      const rawLessons = await distillLessons(this.llmClient, patterns, expiredEntries);
 
       // Attach metadata to each lesson
       const sourceLoops = expiredEntries.map((e) => `loop_${e.loop_number}`);
       lessons = rawLessons.map((l) =>
         LessonEntrySchema.parse({
           ...l,
-          lesson_id: this.generateId("lesson"),
+          lesson_id: generateId("lesson"),
           goal_id: goalId,
           source_loops: sourceLoops,
           extracted_at: now,
@@ -329,7 +284,7 @@ export class MemoryLifecycleManager {
       );
 
       // Step 3: Quality check
-      qualityCheck = this.validateCompressionQuality(lessons, expiredEntries);
+      qualityCheck = validateCompressionQuality(lessons, expiredEntries);
 
       if (!qualityCheck.passed) {
         // Quality check failed — do NOT delete short-term data
@@ -349,7 +304,7 @@ export class MemoryLifecycleManager {
       }
 
       // Step 4: Store lessons in long-term (by-goal, by-dimension, global)
-      this.storeLessonsLongTerm(goalId, lessons, expiredEntries);
+      storeLessonsLongTerm(this.memoryDir, goalId, lessons, expiredEntries);
 
       // Phase 2 (5.2c): Auto-register lesson entries in VectorIndex
       if (this.vectorIndex) {
@@ -368,15 +323,15 @@ export class MemoryLifecycleManager {
       }
 
       // Step 5: Update statistics
-      this.updateStatistics(goalId, expiredEntries);
+      updateStatistics(this.memoryDir, goalId, expiredEntries);
 
       // Step 6: Purge compressed short-term entries (only if compression succeeded)
       const compressedIds = new Set(expiredEntries.map((e) => e.id));
       const remaining = allEntries.filter((e) => !compressedIds.has(e.id));
-      this.atomicWrite(dataFile, remaining);
+      atomicWrite(dataFile, remaining);
 
       // Remove purged entries from the short-term index
-      this.removeFromIndex("short-term", compressedIds);
+      removeFromIndex(this.memoryDir, "short-term", compressedIds);
     } catch {
       // LLM failure — never delete short-term data
       return {
@@ -424,7 +379,7 @@ export class MemoryLifecycleManager {
     maxEntries: number = 10
   ): { shortTerm: ShortTermEntry[]; lessons: LessonEntry[] } {
     // 1. Tag-based query: short-term entries for this goal matching dimensions/tags
-    const stIndex = this.loadIndex("short-term");
+    const stIndex = loadIndex(this.memoryDir, "short-term");
     const matchingIndexEntries = stIndex.entries.filter(
       (ie) =>
         ie.goal_id === goalId &&
@@ -453,7 +408,7 @@ export class MemoryLifecycleManager {
         idxEntry.data_file
       );
       const allEntries =
-        this.readJsonFile<ShortTermEntry[]>(
+        readJsonFile<ShortTermEntry[]>(
           dataFilePath,
           z.array(ShortTermEntrySchema)
         ) ?? [];
@@ -463,7 +418,7 @@ export class MemoryLifecycleManager {
         seenEntryIds.add(idxEntry.entry_id);
 
         // Update access metadata in index
-        this.touchIndexEntry("short-term", idxEntry.id);
+        touchIndexEntry(this.memoryDir, "short-term", idxEntry.id);
       }
     }
 
@@ -493,7 +448,7 @@ export class MemoryLifecycleManager {
           idxEntry.data_file
         );
         const allEntries =
-          this.readJsonFile<ShortTermEntry[]>(
+          readJsonFile<ShortTermEntry[]>(
             dataFilePath,
             z.array(ShortTermEntrySchema)
           ) ?? [];
@@ -515,11 +470,12 @@ export class MemoryLifecycleManager {
     }
 
     // 2. Query long-term lessons matching tags (cross-goal OK for lessons)
-    const goalLessons = this.queryLessons(tags, dimensions, Math.ceil(maxEntries * 0.75));
+    const goalLessons = queryLessons(this.memoryDir, tags, dimensions, Math.ceil(maxEntries * 0.75));
 
     // Phase 2 (5.2c): Include cross-goal lessons (up to 25% of budget)
     const crossGoalBudget = Math.max(1, Math.floor(maxEntries * 0.25));
-    const crossGoalLessons = this.queryCrossGoalLessons(
+    const crossGoalLessonList = queryCrossGoalLessons(
+      this.memoryDir,
       tags,
       dimensions,
       goalId,
@@ -528,7 +484,7 @@ export class MemoryLifecycleManager {
 
     // Deduplicate cross-goal lessons against goal lessons
     const seenLessonIds = new Set(goalLessons.map((l) => l.lesson_id));
-    const dedupedCrossGoal = crossGoalLessons.filter(
+    const dedupedCrossGoal = crossGoalLessonList.filter(
       (l) => !seenLessonIds.has(l.lesson_id)
     );
 
@@ -648,7 +604,7 @@ export class MemoryLifecycleManager {
    * If no DriveScorer → retention_period (unchanged).
    */
   compressionDelay(goalId: string, dimension: string): number {
-    const retentionPeriod = this.getRetentionLimit(goalId);
+    const retentionPeriod = getRetentionLimit(this.config, goalId);
 
     if (!this.driveScorer) {
       return retentionPeriod;
@@ -713,7 +669,7 @@ export class MemoryLifecycleManager {
         "global.json"
       );
       const globalLessons =
-        this.readJsonFile<LessonEntry[]>(
+        readJsonFile<LessonEntry[]>(
           globalPath,
           z.array(LessonEntrySchema)
         ) ?? [];
@@ -742,7 +698,7 @@ export class MemoryLifecycleManager {
       "global.json"
     );
     const globalLessons =
-      this.readJsonFile<LessonEntry[]>(
+      readJsonFile<LessonEntry[]>(
         globalPath,
         z.array(LessonEntrySchema)
       ) ?? [];
@@ -805,7 +761,7 @@ export class MemoryLifecycleManager {
     );
 
     // Load short-term index for recency data
-    const stIndex = this.loadIndex("short-term");
+    const stIndex = loadIndex(this.memoryDir, "short-term");
     const indexEntryMap = new Map(
       stIndex.entries.map((ie) => [ie.entry_id, ie])
     );
@@ -835,7 +791,7 @@ export class MemoryLifecycleManager {
         idxEntry.data_file
       );
       const allEntries =
-        this.readJsonFile<ShortTermEntry[]>(
+        readJsonFile<ShortTermEntry[]>(
           dataFilePath,
           z.array(ShortTermEntrySchema)
         ) ?? [];
@@ -843,7 +799,7 @@ export class MemoryLifecycleManager {
       if (found) {
         scoredEntries.push({ entry: found, combinedScore });
         seenEntryIds.add(result.id);
-        this.touchIndexEntry("short-term", idxEntry.id);
+        touchIndexEntry(this.memoryDir, "short-term", idxEntry.id);
       }
     }
 
@@ -854,7 +810,7 @@ export class MemoryLifecycleManager {
       .map((s) => s.entry);
 
     // Still use tag/dimension-based lesson query for long-term
-    const lessons = this.queryLessons(tags, dimensions, maxEntries);
+    const lessons = queryLessons(this.memoryDir, tags, dimensions, maxEntries);
 
     return { shortTerm: shortTermEntries, lessons };
   }
@@ -877,11 +833,11 @@ export class MemoryLifecycleManager {
     const results: CompressionResult[] = [];
 
     for (const dataType of dataTypes) {
-      const dataFile = this.getDataFile(goalId, dataType);
+      const dataFile = getDataFile(this.memoryDir, goalId, dataType);
       if (!fs.existsSync(dataFile)) continue;
 
       const entries =
-        this.readJsonFile<ShortTermEntry[]>(
+        readJsonFile<ShortTermEntry[]>(
           dataFile,
           z.array(ShortTermEntrySchema)
         ) ?? [];
@@ -907,13 +863,13 @@ export class MemoryLifecycleManager {
           ...allDimensions.map((dim) => this.compressionDelay(goalId, dim))
         );
       } else {
-        effectiveRetentionLimit = this.getRetentionLimit(goalId);
+        effectiveRetentionLimit = getRetentionLimit(this.config, goalId);
       }
 
       // Check for early compression candidates — reduce retention limit if any dimension is satisfied
       const earlyDims = this.earlyCompressionCandidates.get(goalId);
       if (earlyDims && allDimensions.some(d => earlyDims.has(d))) {
-        effectiveRetentionLimit = Math.min(effectiveRetentionLimit, Math.floor(this.getRetentionLimit(goalId) * 0.5));
+        effectiveRetentionLimit = Math.min(effectiveRetentionLimit, Math.floor(getRetentionLimit(this.config, goalId) * 0.5));
       }
 
       // Trigger compression if span of loops exceeds effective retention limit
@@ -946,11 +902,11 @@ export class MemoryLifecycleManager {
 
     // Step 1: Compress all remaining short-term data (best-effort)
     for (const dataType of dataTypes) {
-      const dataFile = this.getDataFile(goalId, dataType);
+      const dataFile = getDataFile(this.memoryDir, goalId, dataType);
       if (!fs.existsSync(dataFile)) continue;
 
       const entries =
-        this.readJsonFile<ShortTermEntry[]>(
+        readJsonFile<ShortTermEntry[]>(
           dataFile,
           z.array(ShortTermEntrySchema)
         ) ?? [];
@@ -988,7 +944,7 @@ export class MemoryLifecycleManager {
       fs.rmSync(goalShortTermDir, { recursive: true, force: true });
 
       // Remove goal's entries from short-term index
-      this.removeGoalFromIndex("short-term", goalId);
+      removeGoalFromIndex(this.memoryDir, "short-term", goalId);
     }
 
     // Step 3: Archive long-term data (lessons + statistics) for this goal
@@ -1010,16 +966,16 @@ export class MemoryLifecycleManager {
       fs.mkdirSync(archiveGoalDir, { recursive: true });
       const archiveLessonsPath = path.join(archiveGoalDir, "lessons.json");
       const existingArchive =
-        this.readJsonFile<LessonEntry[]>(
+        readJsonFile<LessonEntry[]>(
           archiveLessonsPath,
           z.array(LessonEntrySchema)
         ) ?? [];
       const goalLessons =
-        this.readJsonFile<LessonEntry[]>(
+        readJsonFile<LessonEntry[]>(
           byGoalLessonsPath,
           z.array(LessonEntrySchema)
         ) ?? [];
-      this.atomicWrite(archiveLessonsPath, [
+      atomicWrite(archiveLessonsPath, [
         ...existingArchive,
         ...goalLessons,
       ]);
@@ -1028,26 +984,26 @@ export class MemoryLifecycleManager {
     if (fs.existsSync(statisticsPath)) {
       fs.mkdirSync(archiveGoalDir, { recursive: true });
       const archiveStatsPath = path.join(archiveGoalDir, "statistics.json");
-      const stats = this.readJsonFile<StatisticalSummary>(
+      const stats = readJsonFile<StatisticalSummary>(
         statisticsPath,
         StatisticalSummarySchema
       );
       if (stats) {
-        this.atomicWrite(archiveStatsPath, stats);
+        atomicWrite(archiveStatsPath, stats);
       }
     }
 
     // Step 4: Mark all goal lessons as archived in long-term
     if (fs.existsSync(byGoalLessonsPath)) {
       const lessons =
-        this.readJsonFile<LessonEntry[]>(
+        readJsonFile<LessonEntry[]>(
           byGoalLessonsPath,
           z.array(LessonEntrySchema)
         ) ?? [];
       const archived = lessons.map((l) =>
         LessonEntrySchema.parse({ ...l, status: "archived" })
       );
-      this.atomicWrite(byGoalLessonsPath, archived);
+      atomicWrite(byGoalLessonsPath, archived);
     }
 
     void reason; // used for potential future audit logging
@@ -1065,7 +1021,7 @@ export class MemoryLifecycleManager {
       "statistics",
       `${goalId}.json`
     );
-    return this.readJsonFile<StatisticalSummary>(
+    return readJsonFile<StatisticalSummary>(
       statsPath,
       StatisticalSummarySchema
     );
@@ -1097,7 +1053,7 @@ export class MemoryLifecycleManager {
     // Check short-term size per goal
     for (const goalId of goalDirs) {
       const goalDir = path.join(shortTermGoalsDir, goalId);
-      const size = this.getDirectorySize(goalDir);
+      const size = getDirectorySize(goalDir);
 
       if (size > shortTermLimitBytes) {
         // Trigger early compression for all data types
@@ -1121,419 +1077,15 @@ export class MemoryLifecycleManager {
     // Check long-term total size
     const longTermDir = path.join(this.memoryDir, "long-term");
     if (fs.existsSync(longTermDir)) {
-      const longTermSize = this.getDirectorySize(longTermDir);
+      const longTermSize = getDirectorySize(longTermDir);
       const longTermLimitBytes =
         this.config.size_limits.long_term_total_mb * 1024 * 1024;
 
       if (longTermSize > longTermLimitBytes) {
         // Archive oldest (by last_accessed) lessons from long-term index
-        this.archiveOldestLongTermEntries();
+        archiveOldestLongTermEntries(this.memoryDir);
       }
     }
-  }
-
-  // ─── Private: Index Management ───
-
-  private initializeIndex(layer: "short-term" | "long-term"): void {
-    const indexPath = path.join(this.memoryDir, layer, "index.json");
-    if (!fs.existsSync(indexPath)) {
-      const emptyIndex: MemoryIndex = MemoryIndexSchema.parse({
-        version: 1,
-        last_updated: new Date().toISOString(),
-        entries: [],
-      });
-      fs.mkdirSync(path.dirname(indexPath), { recursive: true });
-      this.atomicWrite(indexPath, emptyIndex);
-    }
-  }
-
-  private loadIndex(layer: "short-term" | "long-term"): MemoryIndex {
-    const indexPath = path.join(this.memoryDir, layer, "index.json");
-    const raw = this.readJsonFile<MemoryIndex>(indexPath, MemoryIndexSchema);
-    if (raw === null) {
-      return MemoryIndexSchema.parse({
-        version: 1,
-        last_updated: new Date().toISOString(),
-        entries: [],
-      });
-    }
-    return raw;
-  }
-
-  private saveIndex(layer: "short-term" | "long-term", index: MemoryIndex): void {
-    const indexPath = path.join(this.memoryDir, layer, "index.json");
-    fs.mkdirSync(path.dirname(indexPath), { recursive: true });
-    const updated = MemoryIndexSchema.parse({
-      ...index,
-      last_updated: new Date().toISOString(),
-    });
-    this.atomicWrite(indexPath, updated);
-  }
-
-  private updateIndex(
-    layer: "short-term" | "long-term",
-    entry: MemoryIndexEntry
-  ): void {
-    const index = this.loadIndex(layer);
-    index.entries.push(entry);
-    this.saveIndex(layer, index);
-  }
-
-  private removeFromIndex(
-    layer: "short-term" | "long-term",
-    entryIds: Set<string>
-  ): void {
-    const index = this.loadIndex(layer);
-    index.entries = index.entries.filter(
-      (ie) => !entryIds.has(ie.entry_id)
-    );
-    this.saveIndex(layer, index);
-  }
-
-  private removeGoalFromIndex(
-    layer: "short-term" | "long-term",
-    goalId: string
-  ): void {
-    const index = this.loadIndex(layer);
-    index.entries = index.entries.filter((ie) => ie.goal_id !== goalId);
-    this.saveIndex(layer, index);
-  }
-
-  private touchIndexEntry(
-    layer: "short-term" | "long-term",
-    indexId: string
-  ): void {
-    const index = this.loadIndex(layer);
-    const now = new Date().toISOString();
-    const updated = index.entries.map((ie) => {
-      if (ie.id === indexId) {
-        return { ...ie, last_accessed: now, access_count: ie.access_count + 1 };
-      }
-      return ie;
-    });
-    this.saveIndex(layer, { ...index, entries: updated });
-  }
-
-  private archiveOldestLongTermEntries(): void {
-    const index = this.loadIndex("long-term");
-
-    // Sort by last_accessed ascending (oldest first)
-    const sorted = [...index.entries].sort(
-      (a, b) =>
-        new Date(a.last_accessed).getTime() -
-        new Date(b.last_accessed).getTime()
-    );
-
-    // Archive oldest 10% of entries
-    const archiveCount = Math.max(1, Math.floor(sorted.length * 0.1));
-    const toArchive = sorted.slice(0, archiveCount);
-    const toArchiveIds = new Set(toArchive.map((ie) => ie.entry_id));
-
-    // Remove from active index
-    index.entries = index.entries.filter(
-      (ie) => !toArchiveIds.has(ie.entry_id)
-    );
-    this.saveIndex("long-term", index);
-  }
-
-  // ─── Private: Lesson Storage ───
-
-  private storeLessonsLongTerm(
-    goalId: string,
-    lessons: LessonEntry[],
-    sourceEntries: ShortTermEntry[]
-  ): void {
-    // 1. Store by-goal
-    const byGoalPath = path.join(
-      this.memoryDir,
-      "long-term",
-      "lessons",
-      "by-goal",
-      `${goalId}.json`
-    );
-    const existingByGoal =
-      this.readJsonFile<LessonEntry[]>(byGoalPath, z.array(LessonEntrySchema)) ??
-      [];
-    this.atomicWrite(byGoalPath, [...existingByGoal, ...lessons]);
-
-    // 2. Store by-dimension (for each unique dimension in source entries)
-    const allDimensions = new Set(sourceEntries.flatMap((e) => e.dimensions));
-    for (const dim of allDimensions) {
-      if (!dim) continue;
-      const byDimPath = path.join(
-        this.memoryDir,
-        "long-term",
-        "lessons",
-        "by-dimension",
-        `${dim}.json`
-      );
-      const existingByDim =
-        this.readJsonFile<LessonEntry[]>(byDimPath, z.array(LessonEntrySchema)) ??
-        [];
-      // Store lessons that have this dimension's tag or are from these source entries
-      const relevantLessons = lessons.filter(
-        (l) =>
-          l.relevance_tags.includes(dim) ||
-          l.relevance_tags.length === 0 // include all if no tags
-      );
-      if (relevantLessons.length > 0) {
-        this.atomicWrite(byDimPath, [...existingByDim, ...relevantLessons]);
-      }
-    }
-
-    // 3. Store in global (all lessons are cross-goal knowledge)
-    const globalPath = path.join(
-      this.memoryDir,
-      "long-term",
-      "lessons",
-      "global.json"
-    );
-    const existingGlobal =
-      this.readJsonFile<LessonEntry[]>(
-        globalPath,
-        z.array(LessonEntrySchema)
-      ) ?? [];
-    this.atomicWrite(globalPath, [...existingGlobal, ...lessons]);
-
-    // 4. Update long-term index
-    const now = new Date().toISOString();
-    for (const lesson of lessons) {
-      this.updateIndex("long-term", {
-        id: this.generateId("ltidx"),
-        goal_id: goalId,
-        dimensions: sourceEntries
-          .filter((e) =>
-            lesson.source_loops.includes(`loop_${e.loop_number}`)
-          )
-          .flatMap((e) => e.dimensions),
-        tags: lesson.relevance_tags,
-        timestamp: lesson.extracted_at,
-        data_file: path.join(
-          "lessons",
-          "by-goal",
-          `${goalId}.json`
-        ),
-        entry_id: lesson.lesson_id,
-        last_accessed: now,
-        access_count: 0,
-        embedding_id: null,
-      });
-    }
-  }
-
-  // ─── Private: Statistics ───
-
-  private updateStatistics(
-    goalId: string,
-    entries: ShortTermEntry[]
-  ): void {
-    const statsPath = path.join(
-      this.memoryDir,
-      "long-term",
-      "statistics",
-      `${goalId}.json`
-    );
-    const now = new Date().toISOString();
-
-    // Load existing or create fresh
-    const existing = this.readJsonFile<StatisticalSummary>(
-      statsPath,
-      StatisticalSummarySchema
-    );
-
-    // Compute task statistics from task entries
-    const taskEntries = entries.filter((e) => e.data_type === "task");
-    const taskCategoryMap = new Map<
-      string,
-      { total: number; success: number; durations: number[] }
-    >();
-
-    for (const entry of taskEntries) {
-      const category =
-        typeof entry.data["task_category"] === "string"
-          ? entry.data["task_category"]
-          : "unknown";
-      const status =
-        typeof entry.data["status"] === "string" ? entry.data["status"] : "";
-      const durationHours =
-        typeof entry.data["duration_hours"] === "number"
-          ? entry.data["duration_hours"]
-          : 0;
-
-      const current = taskCategoryMap.get(category) ?? {
-        total: 0,
-        success: 0,
-        durations: [],
-      };
-      current.total++;
-      if (status === "completed") current.success++;
-      if (durationHours > 0) current.durations.push(durationHours);
-      taskCategoryMap.set(category, current);
-    }
-
-    const taskStats = Array.from(taskCategoryMap.entries()).map(
-      ([category, stats]) => ({
-        task_category: category,
-        goal_id: goalId,
-        stats: {
-          total_count: stats.total,
-          success_rate:
-            stats.total > 0 ? stats.success / stats.total : 0,
-          avg_duration_hours:
-            stats.durations.length > 0
-              ? stats.durations.reduce((a, b) => a + b, 0) /
-                stats.durations.length
-              : 0,
-          common_failure_reason: undefined,
-        },
-        period: this.computePeriod(entries),
-        updated_at: now,
-      })
-    );
-
-    // Compute dimension statistics from observation entries
-    const observationEntries = entries.filter(
-      (e) => e.data_type === "observation"
-    );
-    const dimMap = new Map<string, number[]>();
-
-    for (const entry of observationEntries) {
-      for (const dim of entry.dimensions) {
-        const value =
-          typeof entry.data["value"] === "number" ? entry.data["value"] : null;
-        if (value !== null) {
-          const arr = dimMap.get(dim) ?? [];
-          arr.push(value);
-          dimMap.set(dim, arr);
-        }
-      }
-    }
-
-    const dimensionStats = Array.from(dimMap.entries())
-      .filter(([, values]) => values.length > 0)
-      .map(([dim, values]) => {
-        const avg = values.reduce((a, b) => a + b, 0) / values.length;
-        const variance =
-          values.reduce((sum, v) => sum + Math.pow(v - avg, 2), 0) /
-          values.length;
-        const stdDev = Math.sqrt(variance);
-        const trend = this.computeTrend(values);
-        return {
-          dimension_name: dim,
-          goal_id: goalId,
-          stats: {
-            avg_value: avg,
-            std_deviation: stdDev,
-            trend,
-            anomaly_frequency: 0,
-            observation_count: values.length,
-          },
-          period: this.computePeriod(entries),
-          updated_at: now,
-        };
-      });
-
-    // Overall stats
-    const totalLoops = entries.length > 0
-      ? entries[entries.length - 1]!.loop_number -
-        entries[0]!.loop_number +
-        1
-      : 0;
-    const totalTasks = taskEntries.length;
-    const successfulTasks = taskEntries.filter(
-      (e) => e.data["status"] === "completed"
-    ).length;
-    const overallSuccessRate =
-      totalTasks > 0 ? successfulTasks / totalTasks : 0;
-
-    // Merge with existing stats
-    const mergedTaskStats = this.mergeTaskStats(
-      existing?.task_stats ?? [],
-      taskStats
-    );
-    const mergedDimStats = this.mergeDimStats(
-      existing?.dimension_stats ?? [],
-      dimensionStats
-    );
-
-    const summary = StatisticalSummarySchema.parse({
-      goal_id: goalId,
-      task_stats: mergedTaskStats,
-      dimension_stats: mergedDimStats,
-      overall: {
-        total_loops:
-          (existing?.overall.total_loops ?? 0) + totalLoops,
-        total_tasks:
-          (existing?.overall.total_tasks ?? 0) + totalTasks,
-        overall_success_rate: overallSuccessRate,
-        active_period: this.computePeriod(entries),
-      },
-      updated_at: now,
-    });
-
-    this.atomicWrite(statsPath, summary);
-  }
-
-  private mergeTaskStats(
-    existing: StatisticalSummary["task_stats"],
-    incoming: StatisticalSummary["task_stats"]
-  ): StatisticalSummary["task_stats"] {
-    const map = new Map(existing.map((s) => [s.task_category, s]));
-    for (const inc of incoming) {
-      const prev = map.get(inc.task_category);
-      if (!prev) {
-        map.set(inc.task_category, inc);
-        continue;
-      }
-      const totalCount = prev.stats.total_count + inc.stats.total_count;
-      const prevSuccess = prev.stats.success_rate * prev.stats.total_count;
-      const incSuccess = inc.stats.success_rate * inc.stats.total_count;
-      map.set(inc.task_category, {
-        ...inc,
-        stats: {
-          total_count: totalCount,
-          success_rate: totalCount > 0 ? (prevSuccess + incSuccess) / totalCount : 0,
-          avg_duration_hours:
-            (prev.stats.avg_duration_hours + inc.stats.avg_duration_hours) / 2,
-          common_failure_reason: inc.stats.common_failure_reason,
-        },
-      });
-    }
-    return Array.from(map.values());
-  }
-
-  private mergeDimStats(
-    existing: StatisticalSummary["dimension_stats"],
-    incoming: StatisticalSummary["dimension_stats"]
-  ): StatisticalSummary["dimension_stats"] {
-    const map = new Map(existing.map((s) => [s.dimension_name, s]));
-    for (const inc of incoming) {
-      map.set(inc.dimension_name, inc); // Replace with latest computation
-    }
-    return Array.from(map.values());
-  }
-
-  private computeTrend(
-    values: number[]
-  ): "rising" | "falling" | "stable" {
-    if (values.length < 2) return "stable";
-    const first = values.slice(0, Math.floor(values.length / 2));
-    const second = values.slice(Math.floor(values.length / 2));
-    const avgFirst = first.reduce((a, b) => a + b, 0) / first.length;
-    const avgSecond = second.reduce((a, b) => a + b, 0) / second.length;
-    const delta = avgSecond - avgFirst;
-    const threshold = Math.abs(avgFirst) * 0.05; // 5% change threshold
-    if (delta > threshold) return "rising";
-    if (delta < -threshold) return "falling";
-    return "stable";
-  }
-
-  private computePeriod(entries: ShortTermEntry[]): string {
-    if (entries.length === 0) return "unknown";
-    const timestamps = entries.map((e) => e.timestamp).sort();
-    const first = timestamps[0]?.slice(0, 10) ?? "unknown";
-    const last = timestamps[timestamps.length - 1]?.slice(0, 10) ?? "unknown";
-    return first === last ? first : `${first} to ${last}`;
   }
 
   // ─── Private: Force-compress remaining entries on goal close ───
@@ -1546,14 +1098,14 @@ export class MemoryLifecycleManager {
     if (entries.length === 0) return;
 
     const now = new Date().toISOString();
-    const patterns = await this.extractPatterns(entries);
-    const rawLessons = await this.distillLessons(patterns, entries);
+    const patterns = await extractPatterns(this.llmClient, entries);
+    const rawLessons = await distillLessons(this.llmClient, patterns, entries);
     const sourceLoops = entries.map((e) => `loop_${e.loop_number}`);
 
     const lessons: LessonEntry[] = rawLessons.map((l) =>
       LessonEntrySchema.parse({
         ...l,
-        lesson_id: this.generateId("lesson"),
+        lesson_id: generateId("lesson"),
         goal_id: goalId,
         source_loops: sourceLoops,
         extracted_at: now,
@@ -1562,393 +1114,52 @@ export class MemoryLifecycleManager {
       })
     );
 
-    this.storeLessonsLongTerm(goalId, lessons, entries);
-    this.updateStatistics(goalId, entries);
+    storeLessonsLongTerm(this.memoryDir, goalId, lessons, entries);
+    updateStatistics(this.memoryDir, goalId, entries);
 
     void dataType; // type info available for future audit logging
   }
-
-  // ─── Private: Lesson Query ───
-
-  private queryLessons(
-    tags: string[],
-    dimensions: string[],
-    maxCount: number
-  ): LessonEntry[] {
-    const results: LessonEntry[] = [];
-    const seen = new Set<string>();
-
-    // Query by-dimension lessons
-    for (const dim of dimensions) {
-      const byDimPath = path.join(
-        this.memoryDir,
-        "long-term",
-        "lessons",
-        "by-dimension",
-        `${dim}.json`
-      );
-      const lessons =
-        this.readJsonFile<LessonEntry[]>(byDimPath, z.array(LessonEntrySchema)) ??
-        [];
-      for (const l of lessons) {
-        if (
-          !seen.has(l.lesson_id) &&
-          l.status === "active" &&
-          results.length < maxCount
-        ) {
-          results.push(l);
-          seen.add(l.lesson_id);
-        }
-      }
-    }
-
-    // Query global lessons matching tags
-    if (results.length < maxCount && tags.length > 0) {
-      const globalPath = path.join(
-        this.memoryDir,
-        "long-term",
-        "lessons",
-        "global.json"
-      );
-      const globalLessons =
-        this.readJsonFile<LessonEntry[]>(
-          globalPath,
-          z.array(LessonEntrySchema)
-        ) ?? [];
-      const matching = globalLessons.filter(
-        (l) =>
-          !seen.has(l.lesson_id) &&
-          l.status === "active" &&
-          tags.some((t) => l.relevance_tags.includes(t))
-      );
-      // Sort by extracted_at descending (most recent first)
-      matching.sort(
-        (a, b) =>
-          new Date(b.extracted_at).getTime() -
-          new Date(a.extracted_at).getTime()
-      );
-      for (const l of matching) {
-        if (results.length >= maxCount) break;
-        results.push(l);
-        seen.add(l.lesson_id);
-      }
-    }
-
-    return results;
-  }
-
-  // ─── Private: Cross-Goal Lesson Query ───
-
-  /**
-   * Query lessons from ALL goals except the specified goalId.
-   * Used for cross-goal knowledge transfer in selectForWorkingMemory.
-   */
-  private queryCrossGoalLessons(
-    tags: string[],
-    dimensions: string[],
-    excludeGoalId: string,
-    maxCount: number
-  ): LessonEntry[] {
-    const results: LessonEntry[] = [];
-    const seen = new Set<string>();
-
-    // Query global lessons (which include all goals)
-    const globalPath = path.join(
-      this.memoryDir,
-      "long-term",
-      "lessons",
-      "global.json"
-    );
-    const globalLessons =
-      this.readJsonFile<LessonEntry[]>(
-        globalPath,
-        z.array(LessonEntrySchema)
-      ) ?? [];
-
-    // Filter to lessons from other goals that match tags or dimensions
-    const crossGoalLessons = globalLessons.filter(
-      (l) =>
-        l.goal_id !== excludeGoalId &&
-        l.status === "active" &&
-        (tags.some((t) => l.relevance_tags.includes(t)) ||
-          dimensions.some((d) => l.relevance_tags.includes(d)))
-    );
-
-    // Sort by recency
-    crossGoalLessons.sort(
-      (a, b) =>
-        new Date(b.extracted_at).getTime() - new Date(a.extracted_at).getTime()
-    );
-
-    for (const l of crossGoalLessons) {
-      if (results.length >= maxCount) break;
-      if (!seen.has(l.lesson_id)) {
-        results.push(l);
-        seen.add(l.lesson_id);
-      }
-    }
-
-    return results;
-  }
-
-  // ─── Private: LLM Helpers ───
-
-  /**
-   * Call LLM to extract recurring patterns from a set of short-term entries.
-   */
-  private async extractPatterns(
-    entries: ShortTermEntry[]
-  ): Promise<string[]> {
-    const prompt = `Analyze the following experience log entries and extract recurring patterns, key insights, and lessons learned. Focus on what worked, what failed, and why.
-
-Return a JSON object with a "patterns" array of pattern strings:
-{
-  "patterns": ["pattern 1", "pattern 2", ...]
 }
 
-Entries (${entries.length} total):
-${JSON.stringify(
-  entries.slice(0, 20).map((e) => ({
-    data_type: e.data_type,
-    loop_number: e.loop_number,
-    dimensions: e.dimensions,
-    tags: e.tags,
-    data: e.data,
-  })),
-  null,
-  2
-)}`;
+// Re-export types and helpers needed by tests that import from this module
+export type {
+  ShortTermEntry,
+  LessonEntry,
+  StatisticalSummary,
+  MemoryIndex,
+  CompressionResult,
+  RetentionConfig,
+  MemoryDataType,
+} from "../types/memory-lifecycle.js";
 
-    const response = await this.llmClient.sendMessage(
-      [{ role: "user", content: prompt }],
-      {
-        system:
-          "You are a pattern extraction engine. Analyze experience logs and identify recurring patterns, successes, and failures. Respond with JSON only.",
-        max_tokens: 2048,
-      }
-    );
+// Re-export phase helpers for tests that may import them directly
+export {
+  extractPatterns,
+  distillLessons,
+  validateCompressionQuality,
+  updateStatistics,
+  storeLessonsLongTerm,
+  queryLessons,
+  queryCrossGoalLessons,
+  loadIndex,
+  saveIndex,
+  updateIndex,
+  removeFromIndex,
+  removeGoalFromIndex,
+  touchIndexEntry,
+  archiveOldestLongTermEntries,
+  initializeIndex,
+  mergeTaskStats,
+  mergeDimStats,
+  computeTrend,
+  computePeriod,
+} from "./memory-phases.js";
 
-    try {
-      const parsed = this.llmClient.parseJSON(
-        response.content,
-        PatternExtractionResponseSchema
-      );
-      return parsed.patterns;
-    } catch {
-      return [];
-    }
-  }
-
-  /**
-   * Call LLM to convert extracted patterns into structured LessonEntry objects.
-   */
-  private async distillLessons(
-    patterns: string[],
-    entries: ShortTermEntry[]
-  ): Promise<Array<{
-    type: "strategy_outcome" | "success_pattern" | "failure_pattern";
-    context: string;
-    action?: string;
-    outcome?: string;
-    lesson: string;
-    relevance_tags: string[];
-    failure_reason?: string;
-    avoidance_hint?: string;
-    applicability?: string;
-  }>> {
-    if (patterns.length === 0) return [];
-
-    const failureEntries = entries.filter(
-      (e) =>
-        e.data["status"] === "failed" ||
-        e.data["verdict"] === "fail" ||
-        e.data["outcome"] === "failure"
-    );
-
-    const prompt = `Convert the following patterns into structured lessons. For each pattern, determine if it represents a strategy outcome, success pattern, or failure pattern.
-
-Patterns:
-${patterns.map((p, i) => `${i + 1}. ${p}`).join("\n")}
-
-Failure context (${failureEntries.length} failure entries found):
-${JSON.stringify(
-  failureEntries.slice(0, 5).map((e) => e.data),
-  null,
-  2
-)}
-
-Return a JSON object with a "lessons" array:
-{
-  "lessons": [
-    {
-      "type": "strategy_outcome" | "success_pattern" | "failure_pattern",
-      "context": "what situation this lesson applies to",
-      "action": "what action was taken (optional)",
-      "outcome": "what result occurred (optional)",
-      "lesson": "the key lesson learned",
-      "relevance_tags": ["tag1", "tag2"],
-      "failure_reason": "why it failed (for failure_pattern only)",
-      "avoidance_hint": "how to avoid next time (for failure_pattern only)",
-      "applicability": "when to apply (for success_pattern only)"
-    }
-  ]
-}`;
-
-    const response = await this.llmClient.sendMessage(
-      [{ role: "user", content: prompt }],
-      {
-        system:
-          "You are a lesson distillation engine. Convert experience patterns into structured, actionable lessons. Respond with JSON only.",
-        max_tokens: 4096,
-      }
-    );
-
-    try {
-      const parsed = this.llmClient.parseJSON(
-        response.content,
-        LessonDistillationResponseSchema
-      );
-      // Normalize: ensure relevance_tags is always a string[]
-      return parsed.lessons.map((l) => ({
-        ...l,
-        relevance_tags: l.relevance_tags ?? [],
-      }));
-    } catch {
-      return [];
-    }
-  }
-
-  /**
-   * Validate compression quality.
-   * MVP check: lesson_count >= failure_count * 0.5
-   */
-  private validateCompressionQuality(
-    lessons: LessonEntry[],
-    entries: ShortTermEntry[]
-  ): { passed: boolean; failure_coverage_ratio: number; contradictions_found: number } {
-    // Count failure entries
-    const failureCount = entries.filter(
-      (e) =>
-        e.data["status"] === "failed" ||
-        e.data["verdict"] === "fail" ||
-        e.data["outcome"] === "failure"
-    ).length;
-
-    // MVP ratio check: lessons >= failures * 0.5
-    const lessonCount = lessons.length;
-    const failure_coverage_ratio =
-      failureCount === 0
-        ? 1
-        : Math.min(1, lessonCount / (failureCount * 0.5));
-    const passed =
-      failureCount === 0 || lessonCount >= failureCount * 0.5;
-
-    // Contradiction detection: check for lessons with opposite type covering same context
-    let contradictions_found = 0;
-    for (let i = 0; i < lessons.length; i++) {
-      for (let j = i + 1; j < lessons.length; j++) {
-        const a = lessons[i]!;
-        const b = lessons[j]!;
-        const isOppositeType =
-          (a.type === "success_pattern" && b.type === "failure_pattern") ||
-          (a.type === "failure_pattern" && b.type === "success_pattern");
-        const sharesTag = a.relevance_tags.some((t) =>
-          b.relevance_tags.includes(t)
-        );
-        if (isOppositeType && sharesTag) {
-          contradictions_found++;
-        }
-      }
-    }
-
-    return {
-      passed,
-      failure_coverage_ratio,
-      contradictions_found,
-    };
-  }
-
-  // ─── Private: File Helpers ───
-
-  private atomicWrite(filePath: string, data: unknown): void {
-    const dir = path.dirname(filePath);
-    fs.mkdirSync(dir, { recursive: true });
-    const tmpPath = filePath + ".tmp";
-    fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), "utf-8");
-    fs.renameSync(tmpPath, filePath);
-  }
-
-  private readJsonFile<T>(filePath: string, schema: z.ZodTypeAny): T | null {
-    if (!fs.existsSync(filePath)) return null;
-    try {
-      const content = fs.readFileSync(filePath, "utf-8");
-      const raw = JSON.parse(content) as unknown;
-      return schema.parse(raw) as T;
-    } catch {
-      return null;
-    }
-  }
-
-  /**
-   * Map MemoryDataType to the corresponding short-term JSON file path.
-   */
-  private getDataFile(goalId: string, dataType: MemoryDataType): string {
-    const fileNames: Record<MemoryDataType, string> = {
-      experience_log: "experience-log.json",
-      observation: "observations.json",
-      strategy: "strategies.json",
-      task: "tasks.json",
-      knowledge: "knowledge.json",
-    };
-    return path.join(
-      this.memoryDir,
-      "short-term",
-      "goals",
-      goalId,
-      fileNames[dataType]
-    );
-  }
-
-  private generateId(prefix: string): string {
-    return `${prefix}_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
-  }
-
-  /**
-   * Compute total size of a directory recursively in bytes.
-   */
-  private getDirectorySize(dirPath: string): number {
-    if (!fs.existsSync(dirPath)) return 0;
-    let total = 0;
-    const entries = fs.readdirSync(dirPath, { withFileTypes: true });
-    for (const entry of entries) {
-      const entryPath = path.join(dirPath, entry.name);
-      if (entry.isDirectory()) {
-        total += this.getDirectorySize(entryPath);
-      } else {
-        try {
-          total += fs.statSync(entryPath).size;
-        } catch {
-          // Ignore stat errors
-        }
-      }
-    }
-    return total;
-  }
-
-  /**
-   * Get the retention loop limit for a goal, considering goal_type_overrides.
-   * Since goalId does not encode goal type in MVP, use default unless caller
-   * configures an override keyed by goalId prefix.
-   */
-  private getRetentionLimit(goalId: string): number {
-    // Check if any override key is a prefix of goalId
-    for (const [key, limit] of Object.entries(
-      this.config.goal_type_overrides
-    )) {
-      if (goalId.startsWith(key) || goalId.includes(key)) {
-        return limit;
-      }
-    }
-    return this.config.default_retention_loops;
-  }
-}
+export {
+  atomicWrite,
+  readJsonFile,
+  getDataFile,
+  generateId,
+  getDirectorySize,
+  getRetentionLimit,
+} from "./memory-persistence.js";
