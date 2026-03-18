@@ -63,7 +63,12 @@ export class StateManager {
 
   private async goalDir(goalId: string): Promise<string> {
     const dir = path.join(this.baseDir, "goals", goalId);
-    await fsp.mkdir(dir, { recursive: true });
+    try {
+      await fsp.mkdir(dir, { recursive: true });
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return dir;
+      throw err;
+    }
     return dir;
   }
 
@@ -78,7 +83,12 @@ export class StateManager {
       throw err;
     }
     const tmpPath = filePath + ".tmp";
-    await fsp.writeFile(tmpPath, JSON.stringify(data, null, 2), "utf-8");
+    try {
+      await fsp.writeFile(tmpPath, JSON.stringify(data, null, 2), "utf-8");
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+      throw err;
+    }
     try {
       await fsp.rename(tmpPath, filePath);
     } catch (err: unknown) {

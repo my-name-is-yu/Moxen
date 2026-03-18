@@ -73,10 +73,25 @@ export function generateId(prefix: string): string {
  */
 export async function atomicWriteAsync(filePath: string, data: unknown): Promise<void> {
   const dir = path.dirname(filePath);
-  await fsp.mkdir(dir, { recursive: true });
+  try {
+    await fsp.mkdir(dir, { recursive: true });
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw err;
+  }
   const tmpPath = filePath + ".tmp";
-  await fsp.writeFile(tmpPath, JSON.stringify(data, null, 2), "utf-8");
-  await fsp.rename(tmpPath, filePath);
+  try {
+    await fsp.writeFile(tmpPath, JSON.stringify(data, null, 2), "utf-8");
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw err;
+  }
+  try {
+    await fsp.rename(tmpPath, filePath);
+  } catch (err: unknown) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw err;
+  }
 }
 
 /**
