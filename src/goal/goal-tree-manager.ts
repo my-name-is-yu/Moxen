@@ -393,8 +393,7 @@ export class GoalTreeManager {
         for (const item of preprocessed) {
           if (item && typeof item === "object" && !("hypothesis" in item)) {
             this.logger?.warn(
-              "[GoalTreeManager] Subgoal item missing hypothesis. Keys:",
-              Object.keys(item as object)
+              `[GoalTreeManager] Subgoal item missing hypothesis. Keys: ${Object.keys(item as object).join(", ")}`
             );
             const alt =
               (item as Record<string, unknown>).title ??
@@ -434,8 +433,7 @@ export class GoalTreeManager {
     } catch (err) {
       // If subgoal generation fails, treat as leaf -- but log the error for diagnostics
       this.logger?.error(
-        `[GoalTreeManager] Subgoal generation failed for "${goal.id}":`,
-        err instanceof Error ? err.message : String(err)
+        `[GoalTreeManager] Subgoal generation failed for "${goal.id}": ${err instanceof Error ? err.message : String(err)}`
       );
       const leafGoal: Goal = {
         ...updatedGoal,
@@ -504,7 +502,7 @@ export class GoalTreeManager {
         this.goalDependencyGraph.addEdge({
           from_goal_id: goal.id,
           to_goal_id: child.id,
-          type: "parent_child" as never, // type extended in 14A
+          type: "parent_child" as unknown as "prerequisite", // type extended in 14A
           status: "active",
           condition: null,
           affected_dimensions: child.dimensions.map((d) => d.name),

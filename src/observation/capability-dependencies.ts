@@ -112,7 +112,9 @@ export function resolveDependencies(dependencies: CapabilityDependency[]): strin
   for (const dep of dependencies) {
     for (const prereq of dep.depends_on) {
       // prereq must come before dep.capability_id
-      adj.get(prereq)!.push(dep.capability_id);
+      // adj entries are initialized for all IDs in allIds (loop above)
+      const adjList = adj.get(prereq);
+      if (adjList) adjList.push(dep.capability_id);
       inDegree.set(dep.capability_id, (inDegree.get(dep.capability_id) ?? 0) + 1);
     }
   }

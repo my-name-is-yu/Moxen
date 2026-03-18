@@ -34,9 +34,10 @@ export class EventServer {
   async start(): Promise<void> {
     return new Promise((resolve, reject) => {
       this.server = http.createServer((req, res) => this.handleRequest(req, res));
-      this.server.listen(this.port, this.host, () => {
+      const server = this.server;
+      server.listen(this.port, this.host, () => {
         // When port 0 is used, capture the OS-assigned port
-        const addr = this.server!.address();
+        const addr = server.address();
         if (addr && typeof addr === "object") {
           this.port = addr.port;
         }

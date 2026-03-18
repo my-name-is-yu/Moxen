@@ -12,6 +12,7 @@ import type { ProgressEvent } from "../../core-loop.js";
 import type { Task } from "../../types/task.js";
 import { buildDeps } from "../setup.js";
 import { formatOperationError } from "../utils.js";
+import { getCliLogger } from "../cli-logger.js";
 
 export function buildApprovalFn(rl: readline.Interface): (task: Task) => Promise<boolean> {
   return (task: Task): Promise<boolean> => {
@@ -43,7 +44,7 @@ export async function cmdRun(
   const providerConfig = loadProviderConfig();
   const provider = providerConfig.llm_provider;
   if (!apiKey && provider !== "ollama" && provider !== "openai" && provider !== "codex") {
-    console.error(
+    getCliLogger().error(
       "Error: ANTHROPIC_API_KEY environment variable is not set.\n" +
         "Set it with: export ANTHROPIC_API_KEY=<your-key>\n" +
         "Or use OpenAI: export MOTIVA_LLM_PROVIDER=openai\n" +
@@ -108,9 +109,9 @@ export async function cmdRun(
     deps = buildDeps(stateManager, characterConfigManager, apiKey, loopConfig, approvalFn, logger, onProgress);
   } catch (err) {
     rl?.close();
-    console.error(formatOperationError("initialise dependencies", err));
+    logger.error(formatOperationError("initialise dependencies", err));
     if (verbose || process.env.DEBUG) {
-      console.error(err instanceof Error ? err.stack : String(err));
+      logger.error(err instanceof Error ? err.stack ?? String(err) : String(err));
     }
     return 1;
   }
@@ -120,7 +121,7 @@ export async function cmdRun(
   const goal = stateManager.loadGoal(goalId);
   if (!goal) {
     rl?.close();
-    console.error(`Error: Goal "${goalId}" not found.`);
+    logger.error(`Error: Goal "${goalId}" not found.`);
     return 1;
   }
 
@@ -146,10 +147,10 @@ export async function cmdRun(
   try {
     result = await coreLoop.run(goalId);
   } catch (err) {
-    console.error(formatOperationError(`run core loop for goal "${goalId}"`, err));
-    console.error(`Hint: Check ~/.motiva/logs/ for details or re-run with DEBUG=1 for stack traces.`);
+    logger.error(formatOperationError(`run core loop for goal "${goalId}"`, err));
+    logger.error(`Hint: Check ~/.motiva/logs/ for details or re-run with DEBUG=1 for stack traces.`);
     if (verbose || process.env.DEBUG) {
-      console.error(err instanceof Error ? err.stack : String(err));
+      logger.error(err instanceof Error ? err.stack ?? String(err) : String(err));
     }
     process.off("SIGINT", shutdown);
     process.off("SIGTERM", shutdown);
@@ -174,10 +175,10 @@ export async function cmdRun(
     case "completed":
       return 0;
     case "stalled":
-      console.error("Goal stalled — escalation level reached maximum.");
+      logger.error("Goal stalled — escalation level reached maximum.");
       return 2;
     case "error":
-      console.error("Loop ended with error.");
+      logger.error("Loop ended with error.");
       return 1;
     default:
       return 0;

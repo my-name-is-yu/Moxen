@@ -157,7 +157,8 @@ export class TaskLifecycle {
 
     if (!dimensions || dimensions.length === 0) {
       // No dimension metadata available — fall back to drive-score ranking only
-      return ranked[0]!.dimension_name;
+      // ranked is non-empty: gapVector.gaps.length === 0 guard above ensures at least one gap
+      return ranked[0]?.dimension_name ?? gapVector.gaps[0]?.dimension_name ?? "";
     }
 
     // Build a lookup from dimension name → confidence weight
@@ -178,7 +179,8 @@ export class TaskLifecycle {
       return a.dimension_name < b.dimension_name ? -1 : a.dimension_name > b.dimension_name ? 1 : 0;
     });
 
-    return weighted[0]!.dimension_name;
+    // weighted is non-empty: ranked is non-empty (gapVector guard above), weighted maps ranked 1:1
+    return weighted[0]?.dimension_name ?? gapVector.gaps[0]?.dimension_name ?? "";
   }
 
   // ─── generateTask ───

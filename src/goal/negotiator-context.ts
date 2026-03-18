@@ -131,7 +131,7 @@ export async function gatherNegotiationContext(
       parts.splice(1, 0, `Keywords found:\n${keywordResults.join("\n")}`);
     }
   } catch (err) {
-    logger?.warn("[gatherNegotiationContext] Unexpected error:", err);
+    logger?.warn(`[gatherNegotiationContext] Unexpected error: ${err instanceof Error ? err.message : String(err)}`);
     return "";
   }
 

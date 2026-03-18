@@ -5,6 +5,7 @@ import * as path from "node:path";
 import { getDatasourcesDir } from "../../utils/paths.js";
 import { writeJsonFileSync } from "../../utils/json-io.js";
 import { StateManager } from "../../state-manager.js";
+import { getCliLogger } from "../cli-logger.js";
 import { formatOperationError } from "../utils.js";
 
 // ─── Shell Dimension Patterns ───
@@ -185,7 +186,7 @@ export function autoRegisterFileExistenceDataSources(
       `[auto] Registered FileExistenceDataSource for: ${Object.keys(dimensionMapping).join(", ")}`
     );
   } catch (err) {
-    console.error(formatOperationError("auto-register file existence data sources", err));
+    getCliLogger().error(formatOperationError("auto-register file existence data sources", err));
   }
 }
 
@@ -238,6 +239,6 @@ export function autoRegisterShellDataSources(
       `[auto] Registered ShellDataSource for: ${Object.keys(matchedCommands).join(", ")}`
     );
   } catch (err) {
-    console.error(formatOperationError("auto-register shell data sources", err));
+    getCliLogger().error(formatOperationError("auto-register shell data sources", err));
   }
 }

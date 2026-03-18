@@ -1,6 +1,7 @@
 // ─── goal-raw.ts: cmdGoalAddRaw — add a goal without LLM negotiation ───
 
 import { StateManager } from "../../state-manager.js";
+import { getCliLogger } from "../cli-logger.js";
 import {
   RawDimensionSpec,
   parseRawDim,
@@ -15,7 +16,7 @@ export async function cmdGoalAddRaw(
 ): Promise<number> {
   const title = opts.title || opts.description;
   if (!title) {
-    console.error("Error: --title or description is required for raw goal add.");
+    getCliLogger().error("Error: --title or description is required for raw goal add.");
     return 1;
   }
 
@@ -24,12 +25,12 @@ export async function cmdGoalAddRaw(
   for (const raw of opts.rawDimensions) {
     const spec = parseRawDim(raw);
     if (!spec) {
-      console.error(`Error: invalid --dim format "${raw}". Expected "name:type:value" (e.g. "tsc_error_count:min:0")`);
+      getCliLogger().error(`Error: invalid --dim format "${raw}". Expected "name:type:value" (e.g. "tsc_error_count:min:0")`);
       return 1;
     }
     const threshold = buildThreshold(spec);
     if (!threshold) {
-      console.error(`Error: invalid value in --dim "${raw}". Check type/value combination.`);
+      getCliLogger().error(`Error: invalid value in --dim "${raw}". Check type/value combination.`);
       return 1;
     }
     dimSpecs.push(spec);

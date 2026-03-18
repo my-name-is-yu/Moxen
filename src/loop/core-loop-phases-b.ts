@@ -263,7 +263,7 @@ export async function runTaskCycleWithContext(
         const selectionResult = ctx.deps.portfolioManager.selectNextStrategyForTask(goalId);
         if (selectionResult) {
           ctx.deps.taskLifecycle.setOnTaskComplete((strategyId: string) => {
-            ctx.deps.portfolioManager!.recordTaskCompletion(strategyId);
+            ctx.deps.portfolioManager?.recordTaskCompletion(strategyId);
           });
         }
       } catch {

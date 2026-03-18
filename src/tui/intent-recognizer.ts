@@ -117,13 +117,16 @@ export class IntentRecognizer {
   }
 
   private async llmFallback(input: string): Promise<RecognizedIntent> {
+    // llmFallback is only called when this.llmClient is defined (see recognize())
+    const llmClient = this.llmClient;
+    if (!llmClient) return { intent: "unknown", raw: input };
     try {
-      const llmResponse = await this.llmClient!.sendMessage(
+      const llmResponse = await llmClient.sendMessage(
         [{ role: "user", content: input }],
         { system: SYSTEM_PROMPT, max_tokens: 512, temperature: 0 }
       );
 
-      const parsed = this.llmClient!.parseJSON(llmResponse.content, LLMIntentSchema);
+      const parsed = llmClient.parseJSON(llmResponse.content, LLMIntentSchema);
 
       const params: Record<string, string> = {};
       if (parsed.params?.description) params["description"] = parsed.params.description;

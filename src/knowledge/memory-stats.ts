@@ -121,8 +121,8 @@ export function updateStatistics(
 
   // Overall stats
   const totalLoops = entries.length > 0
-    ? entries[entries.length - 1]!.loop_number -
-      entries[0]!.loop_number +
+    ? (entries[entries.length - 1]?.loop_number ?? 0) -
+      (entries[0]?.loop_number ?? 0) +
       1
     : 0;
   const totalTasks = taskEntries.length;

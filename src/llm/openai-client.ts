@@ -130,25 +130,29 @@ export class OpenAILLMClient implements ILLMClient {
             .join("\n\n");
 
           // Use Responses API (SDK supports this as of openai v4+).
-          const resp: any = await (this.client as any).responses.create({
+          // The TypeScript types for the Responses API are not yet in the openai
+          // package typings, so we cast through unknown to access this endpoint.
+          const responsesApi = (this.client as unknown as { responses: { create: (params: Record<string, unknown>) => Promise<unknown> } }).responses;
+          const resp = await responsesApi.create({
             model,
             input,
             max_output_tokens: max_tokens,
             ...(isReasoningModel(model) ? {} : { temperature }),
-          });
+          }) as Record<string, unknown>;
 
           const content =
-            typeof resp.output_text === "string"
-              ? resp.output_text
+            typeof resp["output_text"] === "string"
+              ? resp["output_text"]
               : "";
 
+          const usage = resp["usage"] as Record<string, unknown> | undefined;
           return {
             content,
             usage: {
-              input_tokens: resp.usage?.input_tokens ?? 0,
-              output_tokens: resp.usage?.output_tokens ?? 0,
+              input_tokens: typeof usage?.["input_tokens"] === "number" ? usage["input_tokens"] : 0,
+              output_tokens: typeof usage?.["output_tokens"] === "number" ? usage["output_tokens"] : 0,
             },
-            stop_reason: resp.status ?? "unknown",
+            stop_reason: typeof resp["status"] === "string" ? resp["status"] : "unknown",
           };
         }
       } catch (err) {

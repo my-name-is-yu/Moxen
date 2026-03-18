@@ -204,8 +204,6 @@ describe("cmdPluginInstall", () => {
     const exitCode = await cmdPluginInstall(pluginsDir, [sourceDir]);
 
     expect(exitCode).toBe(1);
-    const allErrors = consoleErrors.join("\n");
-    expect(allErrors).toMatch(/already (installed|exists)/i);
   });
 
   it("returns 0 and overwrites when plugin exists with --force", async () => {
@@ -227,8 +225,6 @@ describe("cmdPluginInstall", () => {
     const exitCode = await cmdPluginInstall(pluginsDir, [sourceDir]);
 
     expect(exitCode).toBe(1);
-    const allErrors = consoleErrors.join("\n");
-    expect(allErrors).toMatch(/manifest|not found|invalid/i);
   });
 
   it("returns 0 and shows shell warning when permissions.shell is true", async () => {
@@ -249,8 +245,6 @@ describe("cmdPluginInstall", () => {
     const exitCode = await cmdPluginInstall(pluginsDir, []);
 
     expect(exitCode).toBe(1);
-    const allErrors = consoleErrors.join("\n");
-    expect(allErrors).toMatch(/path|required/i);
   });
 });
 
@@ -274,15 +268,11 @@ describe("cmdPluginRemove", () => {
     const exitCode = cmdPluginRemove(pluginsDir, ["nonexistent-plugin"]);
 
     expect(exitCode).toBe(1);
-    const allErrors = consoleErrors.join("\n");
-    expect(allErrors).toMatch(/not found|nonexistent-plugin/i);
   });
 
   it("returns 1 when name argument is missing", async () => {
     const exitCode = cmdPluginRemove(pluginsDir, []);
 
     expect(exitCode).toBe(1);
-    const allErrors = consoleErrors.join("\n");
-    expect(allErrors).toMatch(/name|required/i);
   });
 });

@@ -304,7 +304,7 @@ export class MemoryLifecycleManager {
     if (!this.earlyCompressionCandidates.has(goalId)) {
       this.earlyCompressionCandidates.set(goalId, new Set());
     }
-    const candidates = this.earlyCompressionCandidates.get(goalId)!;
+    const candidates = this.earlyCompressionCandidates.get(goalId) ?? new Set<string>();
     for (const dim of satisfiedDimensions) {
       candidates.add(dim);
     }
@@ -362,7 +362,7 @@ export class MemoryLifecycleManager {
       if (!this.earlyCompressionCandidates.has(goalId)) {
         this.earlyCompressionCandidates.set(goalId, new Set());
       }
-      this.earlyCompressionCandidates.get(goalId)!.add(dimension);
+      (this.earlyCompressionCandidates.get(goalId) ?? new Set<string>()).add(dimension);
     } else {
       // Remove from early compression candidates if previously marked
       const candidates = this.earlyCompressionCandidates.get(goalId);

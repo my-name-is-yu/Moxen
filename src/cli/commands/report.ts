@@ -2,13 +2,15 @@
 
 import { StateManager } from "../../state-manager.js";
 import { ReportingEngine } from "../../reporting-engine.js";
+import { getCliLogger } from "../cli-logger.js";
 
 export function cmdReport(stateManager: StateManager, goalId: string): number {
+  const logger = getCliLogger();
   const reportingEngine = new ReportingEngine(stateManager);
 
   const goal = stateManager.loadGoal(goalId);
   if (!goal) {
-    console.error(`Error: Goal "${goalId}" not found.`);
+    logger.error(`Error: Goal "${goalId}" not found.`);
     return 1;
   }
 

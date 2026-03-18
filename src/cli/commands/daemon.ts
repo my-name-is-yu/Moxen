@@ -11,6 +11,7 @@ import { DaemonRunner } from "../../runtime/daemon-runner.js";
 import { PIDManager } from "../../runtime/pid-manager.js";
 import { buildDeps } from "../setup.js";
 import { formatOperationError } from "../utils.js";
+import { getCliLogger } from "../cli-logger.js";
 
 export async function cmdStart(
   stateManager: StateManager,
@@ -29,7 +30,7 @@ export async function cmdStart(
       strict: false,
     }) as { values: { "api-key"?: string; config?: string; goal?: string[] } });
   } catch (err) {
-    console.error(formatOperationError("parse start command arguments", err));
+    getCliLogger().error(formatOperationError("parse start command arguments", err));
     values = {};
   }
 
@@ -37,7 +38,7 @@ export async function cmdStart(
   const goalIds = (values.goal as string[]) || [];
 
   if (goalIds.length === 0) {
-    console.error("Error: at least one --goal is required for daemon mode");
+    getCliLogger().error("Error: at least one --goal is required for daemon mode");
     process.exit(1);
   }
 
@@ -50,7 +51,7 @@ export async function cmdStart(
 
   if (pidManager.isRunning()) {
     const info = pidManager.readPID();
-    console.error(`Daemon already running (PID: ${info?.pid})`);
+    logger.error(`Daemon already running (PID: ${info?.pid})`);
     process.exit(1);
   }
 
@@ -82,7 +83,7 @@ export async function cmdStop(_args: string[]): Promise<void> {
       process.kill(info.pid, "SIGTERM");
       console.log("Stop signal sent");
     } catch (err) {
-      console.error(formatOperationError(`stop daemon process ${info.pid}`, err));
+      getCliLogger().error(formatOperationError(`stop daemon process ${info.pid}`, err));
       pidManager.cleanup();
     }
   }
@@ -100,7 +101,7 @@ export async function cmdCron(args: string[]): Promise<void> {
       strict: false,
     }) as { values: { goal?: string[]; interval?: string } });
   } catch (err) {
-    console.error(formatOperationError("parse cron command arguments", err));
+    getCliLogger().error(formatOperationError("parse cron command arguments", err));
     values = {};
   }
 
@@ -108,7 +109,7 @@ export async function cmdCron(args: string[]): Promise<void> {
   const intervalMinutes = parseInt(values.interval as string, 10) || 60;
 
   if (goalIds.length === 0) {
-    console.error("Error: at least one --goal is required");
+    getCliLogger().error("Error: at least one --goal is required");
     process.exit(1);
   }
 

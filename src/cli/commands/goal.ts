@@ -13,6 +13,7 @@ import { ReportingEngine } from "../../reporting-engine.js";
 import { EthicsRejectedError, gatherNegotiationContext } from "../../goal/goal-negotiator.js";
 import { buildDeps } from "../setup.js";
 import { formatOperationError } from "../utils.js";
+import { getCliLogger } from "../cli-logger.js";
 import {
   autoRegisterFileExistenceDataSources,
   autoRegisterShellDataSources,
@@ -40,7 +41,7 @@ export async function cmdGoalAdd(
   const providerConfig = loadProviderConfig();
   const provider = providerConfig.llm_provider;
   if (!apiKey && provider !== "ollama" && provider !== "openai" && provider !== "codex") {
-    console.error(
+    getCliLogger().error(
       "Error: ANTHROPIC_API_KEY environment variable is not set.\n" +
         "Set it with: export ANTHROPIC_API_KEY=<your-key>\n" +
         "Or use OpenAI: export MOTIVA_LLM_PROVIDER=openai\n" +
@@ -54,7 +55,7 @@ export async function cmdGoalAdd(
   try {
     deps = buildDeps(stateManager, characterConfigManager, apiKey);
   } catch (err) {
-    console.error(formatOperationError("initialise goal negotiation dependencies", err));
+    getCliLogger().error(formatOperationError("initialise goal negotiation dependencies", err));
     return 1;
   }
 
@@ -130,11 +131,11 @@ export async function cmdGoalAdd(
     return 0;
   } catch (err) {
     if (err instanceof EthicsRejectedError) {
-      console.error(formatOperationError(`negotiate goal "${description}" via ethics gate`, err));
-      console.error(`Ethics gate reasoning: ${err.verdict.reasoning}`);
+      getCliLogger().error(formatOperationError(`negotiate goal "${description}" via ethics gate`, err));
+      getCliLogger().error(`Ethics gate reasoning: ${err.verdict.reasoning}`);
       return 1;
     }
-    console.error(formatOperationError(`negotiate goal "${description}"`, err));
+    getCliLogger().error(formatOperationError(`negotiate goal "${description}"`, err));
     return 1;
   }
 }
@@ -152,7 +153,7 @@ export function cmdGoalList(
     try {
       entries = fs.readdirSync(goalsDir);
     } catch (err) {
-      console.error(formatOperationError("read goals directory", err));
+      getCliLogger().error(formatOperationError("read goals directory", err));
       return 1;
     }
 
@@ -160,7 +161,7 @@ export function cmdGoalList(
       try {
         return fs.statSync(path.join(goalsDir, e)).isDirectory();
       } catch (err) {
-        console.error(formatOperationError(`inspect goal directory entry "${e}"`, err));
+        getCliLogger().error(formatOperationError(`inspect goal directory entry "${e}"`, err));
         return false;
       }
     });
@@ -207,7 +208,7 @@ export function cmdGoalList(
           dimCount = raw.dimensions?.length ?? 0;
         }
       } catch (err) {
-        console.error(formatOperationError(`read archived goal metadata for "${goalId}"`, err));
+        getCliLogger().error(formatOperationError(`read archived goal metadata for "${goalId}"`, err));
       }
       console.log(`[${goalId}] status: ${status} — ${title} (dimensions: ${dimCount})`);
     }
@@ -223,7 +224,7 @@ export function cmdStatus(stateManager: StateManager, goalId: string): number {
 
   const goal = stateManager.loadGoal(goalId);
   if (!goal) {
-    console.error(`Error: Goal "${goalId}" not found.`);
+    getCliLogger().error(`Error: Goal "${goalId}" not found.`);
     return 1;
   }
 
@@ -266,7 +267,7 @@ export function cmdStatus(stateManager: StateManager, goalId: string): number {
 export function cmdGoalShow(stateManager: StateManager, goalId: string): number {
   const goal = stateManager.loadGoal(goalId);
   if (!goal) {
-    console.error(`Error: Goal "${goalId}" not found.`);
+    getCliLogger().error(`Error: Goal "${goalId}" not found.`);
     return 1;
   }
 
@@ -303,7 +304,7 @@ export function cmdGoalShow(stateManager: StateManager, goalId: string): number 
 export function cmdGoalReset(stateManager: StateManager, goalId: string): number {
   const goal = stateManager.loadGoal(goalId);
   if (!goal) {
-    console.error(`Error: Goal "${goalId}" not found.`);
+    getCliLogger().error(`Error: Goal "${goalId}" not found.`);
     return 1;
   }
 
@@ -386,19 +387,19 @@ export async function cmdGoalArchive(
 ): Promise<number> {
   const goal = stateManager.loadGoal(goalId);
   if (!goal) {
-    console.error(`Error: Goal "${goalId}" not found.`);
+    getCliLogger().error(`Error: Goal "${goalId}" not found.`);
     return 1;
   }
 
   if (goal.status !== "completed" && !opts.force && !opts.yes) {
-    console.warn(`Warning: Goal "${goalId}" is not completed (status: ${goal.status}).`);
-    console.warn("Archive anyway? Use --yes or --force to skip this check.");
+    getCliLogger().warn(`Warning: Goal "${goalId}" is not completed (status: ${goal.status}).`);
+    getCliLogger().warn("Archive anyway? Use --yes or --force to skip this check.");
     return 1;
   }
 
   const archived = stateManager.archiveGoal(goalId);
   if (!archived) {
-    console.error(`Error: Failed to archive goal "${goalId}".`);
+    getCliLogger().error(`Error: Failed to archive goal "${goalId}".`);
     return 1;
   }
 
@@ -443,11 +444,11 @@ export function cmdCleanup(stateManager: StateManager): number {
             staleReports.push(file);
           }
         } catch (err) {
-          console.error(formatOperationError(`read report metadata from "${file}"`, err));
+          getCliLogger().error(formatOperationError(`read report metadata from "${file}"`, err));
         }
       }
     } catch (err) {
-      console.error(formatOperationError(`scan reports directory "${reportsDir}"`, err));
+      getCliLogger().error(formatOperationError(`scan reports directory "${reportsDir}"`, err));
     }
   }
 

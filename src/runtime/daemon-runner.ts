@@ -478,9 +478,10 @@ export class DaemonRunner {
    */
   private sleep(ms: number): Promise<void> {
     this.sleepAbortController = new AbortController();
+    const abortController = this.sleepAbortController;
     return new Promise<void>((resolve) => {
       const timer = setTimeout(resolve, ms);
-      this.sleepAbortController!.signal.addEventListener("abort", () => {
+      abortController.signal.addEventListener("abort", () => {
         clearTimeout(timer);
         resolve();
       });

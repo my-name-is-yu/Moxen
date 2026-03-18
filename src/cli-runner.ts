@@ -22,6 +22,7 @@
 
 import { parseArgs } from "node:util";
 
+import { getCliLogger } from "./cli/cli-logger.js";
 import { StateManager } from "./state-manager.js";
 import { CharacterConfigManager } from "./traits/character-config.js";
 import type { CoreLoop } from "./core-loop.js";
@@ -54,6 +55,8 @@ import {
 import { cmdStart, cmdStop, cmdCron } from "./cli/commands/daemon.js";
 import { cmdSuggest, cmdImprove } from "./cli/commands/suggest.js";
 import { printUsage, formatOperationError } from "./cli/utils.js";
+
+const logger = getCliLogger();
 
 // ─── CLIRunner ───
 
@@ -128,13 +131,13 @@ export class CLIRunner {
           strict: false,
         }) as { values: { goal?: string; "max-iterations"?: string; adapter?: string; tree?: boolean; yes?: boolean; verbose?: boolean } });
       } catch (err) {
-        console.error(formatOperationError("parse run command arguments", err));
+        logger.error(formatOperationError("parse run command arguments", err));
         values = {};
       }
 
       const goalId = values.goal;
       if (!goalId || typeof goalId !== "string") {
-        console.error("Error: --goal <id> is required for `motiva run`.");
+        logger.error("Error: --goal <id> is required for `motiva run`.");
         return 1;
       }
 
@@ -170,7 +173,7 @@ export class CLIRunner {
       const goalSubcommand = argv[1];
 
       if (!goalSubcommand) {
-        console.error("Error: goal subcommand required. Available: goal add, goal list, goal archive, goal remove, goal show, goal reset");
+        logger.error("Error: goal subcommand required. Available: goal add, goal list, goal archive, goal remove, goal show, goal reset");
         return 1;
       }
 
@@ -202,7 +205,7 @@ export class CLIRunner {
           addValues = parsed.values;
           positionals = parsed.positionals;
         } catch (err) {
-          console.error(formatOperationError("parse goal add arguments", err));
+          logger.error(formatOperationError("parse goal add arguments", err));
           return 1;
         }
 
@@ -214,7 +217,7 @@ export class CLIRunner {
         if (rawDimensions.length > 0 && !addValues.negotiate) {
           const title = addValues.title || description;
           if (!title) {
-            console.error("Error: --title or description is required. Usage: motiva goal add --title \"tsc zero\" --dim \"tsc_error_count:min:0\"");
+            logger.error("Error: --title or description is required. Usage: motiva goal add --title \"tsc zero\" --dim \"tsc_error_count:min:0\"");
             return 1;
           }
           return await cmdGoalAddRaw(this.stateManager, { title, description, rawDimensions });
@@ -222,7 +225,7 @@ export class CLIRunner {
 
         // Negotiate mode: requires description
         if (!description) {
-          console.error('Error: description is required. Usage: motiva goal add "<description>" [--negotiate]');
+          logger.error('Error: description is required. Usage: motiva goal add "<description>" [--negotiate]');
           return 1;
         }
 
@@ -240,7 +243,7 @@ export class CLIRunner {
             strict: false,
           }) as { values: { archived?: boolean } });
         } catch (err) {
-          console.error(formatOperationError("parse goal list arguments", err));
+          logger.error(formatOperationError("parse goal list arguments", err));
           listValues = {};
         }
         return cmdGoalList(this.stateManager, { archived: listValues.archived });
@@ -249,7 +252,7 @@ export class CLIRunner {
       if (goalSubcommand === "archive") {
         const goalId = argv[2];
         if (!goalId) {
-          console.error("Error: goal ID is required. Usage: motiva goal archive <id>");
+          logger.error("Error: goal ID is required. Usage: motiva goal archive <id>");
           return 1;
         }
         let archiveValues: { yes?: boolean; force?: boolean } = {};
@@ -263,7 +266,7 @@ export class CLIRunner {
             strict: false,
           }) as { values: { yes?: boolean; force?: boolean } });
         } catch (err) {
-          console.error(formatOperationError("parse goal archive arguments", err));
+          logger.error(formatOperationError("parse goal archive arguments", err));
           archiveValues = {};
         }
         return await cmdGoalArchive(this.stateManager, goalId, { ...archiveValues, yes: globalYes || archiveValues.yes });
@@ -272,7 +275,7 @@ export class CLIRunner {
       if (goalSubcommand === "remove") {
         const goalId = argv[2];
         if (!goalId) {
-          console.error("Error: goal ID is required. Usage: motiva goal remove <id>");
+          logger.error("Error: goal ID is required. Usage: motiva goal remove <id>");
           return 1;
         }
         const deleted = this.stateManager.deleteGoal(goalId);
@@ -280,7 +283,7 @@ export class CLIRunner {
           console.log(`Goal ${goalId} removed.`);
           return 0;
         } else {
-          console.error(`Goal not found: ${goalId}`);
+          logger.error(`Goal not found: ${goalId}`);
           return 1;
         }
       }
@@ -288,7 +291,7 @@ export class CLIRunner {
       if (goalSubcommand === "show") {
         const goalId = argv[2];
         if (!goalId) {
-          console.error("Error: goal ID is required. Usage: motiva goal show <id>");
+          logger.error("Error: goal ID is required. Usage: motiva goal show <id>");
           return 1;
         }
         return cmdGoalShow(this.stateManager, goalId);
@@ -297,14 +300,14 @@ export class CLIRunner {
       if (goalSubcommand === "reset") {
         const goalId = argv[2];
         if (!goalId) {
-          console.error("Error: goal ID is required. Usage: motiva goal reset <id>");
+          logger.error("Error: goal ID is required. Usage: motiva goal reset <id>");
           return 1;
         }
         return cmdGoalReset(this.stateManager, goalId);
       }
 
-      console.error(`Unknown goal subcommand: "${goalSubcommand}"`);
-      console.error("Available: goal add, goal list, goal archive, goal remove, goal show, goal reset");
+      logger.error(`Unknown goal subcommand: "${goalSubcommand}"`);
+      logger.error("Available: goal add, goal list, goal archive, goal remove, goal show, goal reset");
       return 1;
     }
 
@@ -319,13 +322,13 @@ export class CLIRunner {
           strict: false,
         }) as { values: { goal?: string } });
       } catch (err) {
-        console.error(formatOperationError("parse status command arguments", err));
+        logger.error(formatOperationError("parse status command arguments", err));
         values = {};
       }
 
       const goalId = values.goal;
       if (!goalId || typeof goalId !== "string") {
-        console.error("Error: --goal <id> is required for `motiva status`.");
+        logger.error("Error: --goal <id> is required for `motiva status`.");
         return 1;
       }
 
@@ -343,13 +346,13 @@ export class CLIRunner {
           strict: false,
         }) as { values: { goal?: string } });
       } catch (err) {
-        console.error(formatOperationError("parse report command arguments", err));
+        logger.error(formatOperationError("parse report command arguments", err));
         values = {};
       }
 
       const goalId = values.goal;
       if (!goalId || typeof goalId !== "string") {
-        console.error("Error: --goal <id> is required for `motiva report`.");
+        logger.error("Error: --goal <id> is required for `motiva report`.");
         return 1;
       }
 
@@ -367,13 +370,13 @@ export class CLIRunner {
           strict: false,
         }) as { values: { goal?: string } });
       } catch (err) {
-        console.error(formatOperationError("parse log command arguments", err));
+        logger.error(formatOperationError("parse log command arguments", err));
         values = {};
       }
 
       const goalId = values.goal;
       if (!goalId || typeof goalId !== "string") {
-        console.error("Error: --goal <id> is required for `motiva log`.");
+        logger.error("Error: --goal <id> is required for `motiva log`.");
         return 1;
       }
 
@@ -399,7 +402,7 @@ export class CLIRunner {
       const dsSubcommand = argv[1];
 
       if (!dsSubcommand) {
-        console.error("Error: datasource subcommand required. Available: datasource add, datasource list, datasource remove");
+        logger.error("Error: datasource subcommand required. Available: datasource add, datasource list, datasource remove");
         return 1;
       }
 
@@ -415,8 +418,8 @@ export class CLIRunner {
         return cmdDatasourceRemove(this.stateManager, argv.slice(2));
       }
 
-      console.error(`Unknown datasource subcommand: "${dsSubcommand}"`);
-      console.error("Available: datasource add, datasource list, datasource remove");
+      logger.error(`Unknown datasource subcommand: "${dsSubcommand}"`);
+      logger.error("Available: datasource add, datasource list, datasource remove");
       return 1;
     }
 
@@ -424,7 +427,7 @@ export class CLIRunner {
       const capSubcommand = argv[1];
 
       if (!capSubcommand) {
-        console.error("Error: capability subcommand required. Available: capability list, capability remove");
+        logger.error("Error: capability subcommand required. Available: capability list, capability remove");
         return 1;
       }
 
@@ -436,8 +439,8 @@ export class CLIRunner {
         return await cmdCapabilityRemove(this.stateManager, argv.slice(2));
       }
 
-      console.error(`Unknown capability subcommand: "${capSubcommand}"`);
-      console.error("Available: capability list, capability remove");
+      logger.error(`Unknown capability subcommand: "${capSubcommand}"`);
+      logger.error("Available: capability list, capability remove");
       return 1;
     }
 
@@ -445,7 +448,7 @@ export class CLIRunner {
       const pluginSubcommand = argv[1];
 
       if (!pluginSubcommand) {
-        console.error("Error: plugin subcommand required. Available: plugin list, plugin install, plugin remove");
+        logger.error("Error: plugin subcommand required. Available: plugin list, plugin install, plugin remove");
         return 1;
       }
 
@@ -461,8 +464,8 @@ export class CLIRunner {
         return cmdPluginRemove(undefined, argv.slice(2));
       }
 
-      console.error(`Unknown plugin subcommand: "${pluginSubcommand}"`);
-      console.error("Available: plugin list, plugin install, plugin remove");
+      logger.error(`Unknown plugin subcommand: "${pluginSubcommand}"`);
+      logger.error("Available: plugin list, plugin install, plugin remove");
       return 1;
     }
 
@@ -478,7 +481,7 @@ export class CLIRunner {
       const configSubcommand = argv[1];
 
       if (!configSubcommand) {
-        console.error("Error: config subcommand required. Available: config character");
+        logger.error("Error: config subcommand required. Available: config character");
         return 1;
       }
 
@@ -486,8 +489,8 @@ export class CLIRunner {
         return cmdConfigCharacter(this.stateManager, this.characterConfigManager, argv.slice(2));
       }
 
-      console.error(`Unknown config subcommand: "${configSubcommand}"`);
-      console.error("Available: config character");
+      logger.error(`Unknown config subcommand: "${configSubcommand}"`);
+      logger.error("Available: config character");
       return 1;
     }
 
@@ -512,7 +515,7 @@ export class CLIRunner {
       return 0;
     }
 
-    console.error(`Unknown subcommand: "${subcommand}"`);
+    logger.error(`Unknown subcommand: "${subcommand}"`);
     printUsage();
     return 1;
   }
@@ -527,7 +530,7 @@ async function main(): Promise<void> {
     const code = await runner.run(argv);
     process.exit(code);
   } catch (err) {
-    console.error(formatOperationError("execute CLI entry point", err));
+    logger.error(formatOperationError("execute CLI entry point", err));
     process.exit(1);
   }
 }
@@ -542,7 +545,7 @@ const isMain = (() => {
     const entryFile = realpathSync(process.argv[1]);
     return thisFile === entryFile;
   } catch (err) {
-    console.error(formatOperationError("resolve CLI entry point path", err));
+    logger.error(formatOperationError("resolve CLI entry point path", err));
     return false;
   }
 })();

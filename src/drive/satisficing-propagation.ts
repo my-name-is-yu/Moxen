@@ -131,7 +131,8 @@ export function propagateSubgoalCompletion(
       // Group subgoal dimensions by target parent_dimension
       const grouped = new Map<string, import("../types/goal.js").Dimension[]>();
       for (const dim of mappedDims) {
-        const mapping = dim.dimension_mapping!;
+        // dimension_mapping is non-null: mappedDims is filtered to only include dims with non-null mapping
+        const mapping = dim.dimension_mapping ?? { parent_dimension: "", aggregation: "average" as const };
         const existing = grouped.get(mapping.parent_dimension) ?? [];
         existing.push(dim);
         grouped.set(mapping.parent_dimension, existing);
@@ -139,7 +140,10 @@ export function propagateSubgoalCompletion(
 
       // Compute aggregated value for each parent dimension
       for (const [parentDimName, dims] of grouped) {
-        const aggregation = dims[0]!.dimension_mapping!.aggregation;
+        // dims is non-empty (grouped entries are only created when pushing to them above)
+        // dimension_mapping is non-null for all dims in this group (filtered by mappedDims)
+        const firstDim = dims[0];
+        const aggregation = firstDim?.dimension_mapping?.aggregation ?? "avg";
 
         const numericValues: number[] = [];
         const fulfillmentRatios: number[] = [];

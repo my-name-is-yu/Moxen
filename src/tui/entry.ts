@@ -26,6 +26,7 @@ import * as DriveScorer from "../drive/drive-scorer.js";
 import type { GapCalculatorModule, DriveScorerModule } from "../core-loop.js";
 
 import { App, type ApprovalRequest } from "./app.js";
+import { getCliLogger } from "../cli/cli-logger.js";
 import { ActionHandler } from "./actions.js";
 import { IntentRecognizer } from "./intent-recognizer.js";
 import type { Task } from "../types/task.js";
@@ -122,7 +123,7 @@ export async function startTUI(): Promise<void> {
   // 1. Check API key requirements (deferred to buildLLMClient via provider-factory)
   const provider = process.env.MOTIVA_LLM_PROVIDER;
   if (!process.env.ANTHROPIC_API_KEY && provider !== "ollama" && provider !== "openai") {
-    console.error(
+    getCliLogger().error(
       "Error: ANTHROPIC_API_KEY environment variable is not set.\n" +
         "Set it with: export ANTHROPIC_API_KEY=<your-key>\n" +
         "Or use OpenAI: export MOTIVA_LLM_PROVIDER=openai\n" +
@@ -137,7 +138,7 @@ export async function startTUI(): Promise<void> {
     deps = buildDeps();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.error(`Error: Failed to initialise dependencies: ${message}`);
+    getCliLogger().error(`Error: Failed to initialise dependencies: ${message}`);
     process.exit(1);
   }
 
@@ -186,7 +187,7 @@ const isMain =
 
 if (isMain) {
   startTUI().catch((err) => {
-    console.error(err);
+    getCliLogger().error(String(err));
     process.exit(1);
   });
 }

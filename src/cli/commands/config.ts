@@ -14,6 +14,7 @@ import { buildLLMClient } from "../../llm/provider-factory.js";
 import { ReportingEngine } from "../../reporting-engine.js";
 import { CapabilityDetector } from "../../observation/capability-detector.js";
 import { formatOperationError, printCharacterConfig } from "../utils.js";
+import { getCliLogger } from "../cli-logger.js";
 
 export function maskSecrets(config: ProviderConfig): ProviderConfig {
   const mask = (val: string | undefined): string | undefined =>
@@ -47,7 +48,7 @@ export function cmdProvider(argv: string[]): number {
         strict: false,
       }) as { values: { llm?: string; adapter?: string } });
     } catch (err) {
-      console.error(formatOperationError("parse provider set arguments", err));
+      getCliLogger().error(formatOperationError("parse provider set arguments", err));
       values = {};
     }
 
@@ -55,14 +56,14 @@ export function cmdProvider(argv: string[]): number {
     const validAdapters = ["claude_code_cli", "claude_api", "openai_codex_cli", "openai_api", "github_issue"];
 
     if (values.llm && !validLlmProviders.includes(values.llm)) {
-      console.error(
+      getCliLogger().error(
         `Error: invalid --llm provider "${values.llm}". Valid: ${validLlmProviders.join(", ")}`
       );
       return 1;
     }
 
     if (values.adapter && !validAdapters.includes(values.adapter)) {
-      console.error(
+      getCliLogger().error(
         `Error: invalid --adapter "${values.adapter}". Valid: ${validAdapters.join(", ")}`
       );
       return 1;
@@ -81,8 +82,8 @@ export function cmdProvider(argv: string[]): number {
     return 0;
   }
 
-  console.error(`Unknown provider subcommand: "${providerSubcommand}"`);
-  console.error("Available: provider show, provider set");
+  getCliLogger().error(`Unknown provider subcommand: "${providerSubcommand}"`);
+  getCliLogger().error("Available: provider show, provider set");
   return 1;
 }
 
@@ -123,7 +124,7 @@ export function cmdConfigCharacter(
       };
     });
   } catch (err) {
-    console.error(formatOperationError("parse character config arguments", err));
+    getCliLogger().error(formatOperationError("parse character config arguments", err));
     values = {};
   }
 
@@ -177,7 +178,7 @@ Options:
     if (raw !== undefined) {
       const parsed = parseInt(raw, 10);
       if (isNaN(parsed) || parsed < 1 || parsed > 5) {
-        console.error(`Error: --${flag} must be an integer between 1 and 5 (got: ${raw})`);
+        getCliLogger().error(`Error: --${flag} must be an integer between 1 and 5 (got: ${raw})`);
         return 1;
       }
       partial[key] = parsed;
@@ -190,7 +191,7 @@ Options:
     printCharacterConfig(updated);
     return 0;
   } catch (err) {
-    console.error(formatOperationError("update character config", err));
+    getCliLogger().error(formatOperationError("update character config", err));
     return 1;
   }
 }
@@ -203,13 +204,13 @@ export async function cmdDatasourceAdd(
 ): Promise<number> {
   const type = argv[0];
   if (!type) {
-    console.error("Error: type is required. Usage: motiva datasource add <type> [options]");
-    console.error("  Types: file, http_api, github_issue, file_existence");
+    getCliLogger().error("Error: type is required. Usage: motiva datasource add <type> [options]");
+    getCliLogger().error("  Types: file, http_api, github_issue, file_existence");
     return 1;
   }
 
   if (type !== "file" && type !== "http_api" && type !== "github_issue" && type !== "file_existence") {
-    console.error(`Error: unsupported type "${type}". Supported: file, http_api, github_issue, file_existence`);
+    getCliLogger().error(`Error: unsupported type "${type}". Supported: file, http_api, github_issue, file_existence`);
     return 1;
   }
 
@@ -225,7 +226,7 @@ export async function cmdDatasourceAdd(
       strict: false,
     }) as { values: { name?: string; path?: string; url?: string } });
   } catch (err) {
-    console.error(formatOperationError(`parse datasource add arguments for type "${type}"`, err));
+    getCliLogger().error(formatOperationError(`parse datasource add arguments for type "${type}"`, err));
     values = {};
   }
 
@@ -244,13 +245,13 @@ export async function cmdDatasourceAdd(
   let extraConfig: Record<string, unknown> = {};
   if (type === "file") {
     if (!values.path) {
-      console.error("Error: --path is required for file data source");
+      getCliLogger().error("Error: --path is required for file data source");
       return 1;
     }
     connection["path"] = values.path;
   } else if (type === "file_existence") {
     if (!values.path) {
-      console.error("Error: --path is required for file_existence data source");
+      getCliLogger().error("Error: --path is required for file_existence data source");
       return 1;
     }
     connection["path"] = values.path;
@@ -259,7 +260,7 @@ export async function cmdDatasourceAdd(
     // No connection params needed — uses `gh` CLI
   } else {
     if (!values.url) {
-      console.error("Error: --url is required for http_api data source");
+      getCliLogger().error("Error: --url is required for http_api data source");
       return 1;
     }
     connection["url"] = values.url;
@@ -304,7 +305,7 @@ export function cmdDatasourceList(stateManager: StateManager): number {
   try {
     entries = fs.readdirSync(datasourcesDir);
   } catch (err) {
-    console.error(formatOperationError("read datasources directory", err));
+    getCliLogger().error(formatOperationError("read datasources directory", err));
     return 1;
   }
 
@@ -328,7 +329,7 @@ export function cmdDatasourceList(stateManager: StateManager): number {
       const name = cfg.name ?? "(unnamed)";
       console.log(`${id.padEnd(28)} ${type.padEnd(10)} ${enabled.padEnd(8)} ${name}`);
     } catch (err) {
-      console.error(formatOperationError(`parse datasource config "${file}" during datasource listing`, err));
+      getCliLogger().error(formatOperationError(`parse datasource config "${file}" during datasource listing`, err));
     }
   }
 
@@ -341,14 +342,14 @@ export function cmdDatasourceRemove(
 ): number {
   const id = argv[0];
   if (!id) {
-    console.error("Error: id is required. Usage: motiva datasource remove <id>");
+    getCliLogger().error("Error: id is required. Usage: motiva datasource remove <id>");
     return 1;
   }
 
   const configPath = path.join(getDatasourcesDir(stateManager.getBaseDir()), `${id}.json`);
 
   if (!fs.existsSync(configPath)) {
-    console.error(`Error: Data source "${id}" not found.`);
+    getCliLogger().error(`Error: Data source "${id}" not found.`);
     return 1;
   }
 
@@ -369,7 +370,7 @@ export async function cmdCapabilityList(stateManager: StateManager): Promise<num
   try {
     registry = await capabilityDetector.loadRegistry();
   } catch (err) {
-    console.error(formatOperationError("load capability registry", err));
+    getCliLogger().error(formatOperationError("load capability registry", err));
     return 1;
   }
 
@@ -401,7 +402,7 @@ export async function cmdCapabilityRemove(
 ): Promise<number> {
   const name = argv[0];
   if (!name) {
-    console.error("Error: name is required. Usage: motiva capability remove <name>");
+    getCliLogger().error("Error: name is required. Usage: motiva capability remove <name>");
     return 1;
   }
 
@@ -414,7 +415,7 @@ export async function cmdCapabilityRemove(
     console.log(`Capability "${name}" removed.`);
     return 0;
   } catch (err) {
-    console.error(formatOperationError(`remove capability "${name}"`, err));
+    getCliLogger().error(formatOperationError(`remove capability "${name}"`, err));
     return 1;
   }
 }

@@ -40,6 +40,7 @@ import type { GapCalculatorModule, DriveScorerModule, LoopConfig } from "../core
 import type { Task } from "../types/task.js";
 import type { ProgressEvent } from "../core-loop.js";
 import { Logger } from "../runtime/logger.js";
+import { getCliLogger } from "./cli-logger.js";
 import { formatOperationError } from "./utils.js";
 
 export function buildDeps(
@@ -83,7 +84,7 @@ export function buildDeps(
       }
     }
   } catch (err) {
-    console.error(formatOperationError(`load datasource configurations from "${dsDir}"`, err));
+    getCliLogger().error(formatOperationError(`load datasource configurations from "${dsDir}"`, err));
   }
 
   const contextProvider = createWorkspaceContextProvider(
@@ -93,7 +94,7 @@ export function buildDeps(
         const goal = stateManager.loadGoal(goalId);
         return goal?.description;
       } catch (err) {
-        console.error(formatOperationError(`resolve workspace context goal description for "${goalId}"`, err));
+        getCliLogger().error(formatOperationError(`resolve workspace context goal description for "${goalId}"`, err));
         return undefined;
       }
     }
@@ -146,7 +147,7 @@ export function buildDeps(
     );
     memoryLifecycleManager.initializeDirectories();
   } catch (err) {
-    console.warn(`[motiva] MemoryLifecycleManager init failed — memory features disabled: ${err instanceof Error ? err.message : String(err)}`);
+    getCliLogger().warn(`[motiva] MemoryLifecycleManager init failed — memory features disabled: ${err instanceof Error ? err.message : String(err)}`);
     memoryLifecycleManager = undefined;
     driveScoreAdapter = undefined;
   }

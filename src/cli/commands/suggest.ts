@@ -13,6 +13,7 @@ import { SuggestOutputSchema } from "../../types/suggest.js";
 import type { SuggestOutput, Suggestion } from "../../types/suggest.js";
 import { buildDeps } from "../setup.js";
 import { formatOperationError } from "../utils.js";
+import { getCliLogger } from "../cli-logger.js";
 
 // ─── Suggest helpers ───
 
@@ -409,6 +410,7 @@ export async function cmdSuggest(
   characterConfigManager: CharacterConfigManager,
   args: string[]
 ): Promise<number> {
+  const logger = getCliLogger();
   let values: { max?: string; path?: string };
   let positionals: string[];
   try {
@@ -422,13 +424,13 @@ export async function cmdSuggest(
       strict: false,
     }) as { values: { max?: string; path?: string }; positionals: string[] });
   } catch (err) {
-    console.error(formatOperationError("parse suggest command arguments", err));
+    logger.error(formatOperationError("parse suggest command arguments", err));
     return 1;
   }
 
   const context = positionals[0];
   if (!context) {
-    console.error('Usage: motiva suggest "<context>" [--max N] [--path <dir>]');
+    logger.error('Usage: motiva suggest "<context>" [--max N] [--path <dir>]');
     return 1;
   }
 
@@ -436,7 +438,7 @@ export async function cmdSuggest(
   const providerConfig = loadProviderConfig();
   const provider = providerConfig.llm_provider;
   if (!apiKey && provider !== "ollama" && provider !== "openai" && provider !== "codex") {
-    console.error(
+    logger.error(
       "Error: ANTHROPIC_API_KEY environment variable is not set.\n" +
         "Set it with: export ANTHROPIC_API_KEY=<your-key>\n" +
         "Or use OpenAI: export MOTIVA_LLM_PROVIDER=openai\n" +
@@ -450,7 +452,7 @@ export async function cmdSuggest(
   try {
     deps = buildDeps(stateManager, characterConfigManager, apiKey);
   } catch (err) {
-    console.error(formatOperationError("initialise suggest dependencies", err));
+    logger.error(formatOperationError("initialise suggest dependencies", err));
     return 1;
   }
 
@@ -489,7 +491,7 @@ export async function cmdSuggest(
       }
     );
   } catch (err) {
-    console.error(formatOperationError("generate goal suggestions", err));
+    logger.error(formatOperationError("generate goal suggestions", err));
     return 1;
   }
 
@@ -514,6 +516,7 @@ export async function cmdImprove(
   characterConfigManager: CharacterConfigManager,
   args: string[]
 ): Promise<number> {
+  const logger = getCliLogger();
   let values: { auto?: boolean; max?: string; yes?: boolean };
   let positionals: string[];
   try {
@@ -528,7 +531,7 @@ export async function cmdImprove(
       strict: false,
     }) as { values: { auto?: boolean; max?: string; yes?: boolean }; positionals: string[] });
   } catch (err) {
-    console.error(formatOperationError("parse improve command arguments", err));
+    logger.error(formatOperationError("parse improve command arguments", err));
     return 1;
   }
 
@@ -539,7 +542,7 @@ export async function cmdImprove(
   const providerConfig = loadProviderConfig();
   const provider = providerConfig.llm_provider;
   if (!apiKey && provider !== "ollama" && provider !== "openai" && provider !== "codex") {
-    console.error(
+    logger.error(
       "Error: ANTHROPIC_API_KEY environment variable is not set.\n" +
         "Set it with: export ANTHROPIC_API_KEY=<your-key>\n" +
         "Or use OpenAI: export MOTIVA_LLM_PROVIDER=openai\n" +
@@ -553,7 +556,7 @@ export async function cmdImprove(
   try {
     deps = buildDeps(stateManager, characterConfigManager, apiKey);
   } catch (err) {
-    console.error(formatOperationError("initialise improve dependencies", err));
+    logger.error(formatOperationError("initialise improve dependencies", err));
     return 1;
   }
 
@@ -578,7 +581,7 @@ export async function cmdImprove(
       repoPath: targetPath,
     });
   } catch (err) {
-    console.error(formatOperationError("generate improvement suggestions", err));
+    logger.error(formatOperationError("generate improvement suggestions", err));
     return 1;
   }
 
@@ -590,7 +593,7 @@ export async function cmdImprove(
   // Step 3: Select goal(s)
   let selectedIndex = 0;
   if (values.auto) {
-    console.log(`[Auto] Selected: ${suggestions[0]!.title}`);
+    console.log(`[Auto] Selected: ${suggestions[0]?.title ?? ""}`);
   } else {
     console.log("=== Suggested Improvements ===\n");
     for (let i = 0; i < suggestions.length; i++) {
@@ -601,7 +604,7 @@ export async function cmdImprove(
     }
     if (values.yes) {
       selectedIndex = 0;
-      console.log(`[--yes] Auto-selecting: ${suggestions[0]!.title}\n`);
+      console.log(`[--yes] Auto-selecting: ${suggestions[0]?.title ?? ""}\n`);
     } else {
       selectedIndex = 0;
       console.log(`Selected: ${suggestions[0]!.title}\n`);
@@ -610,7 +613,7 @@ export async function cmdImprove(
 
   const selected = suggestions[selectedIndex];
   if (!selected) {
-    console.error("Error: no suggestion available at index 0.");
+    logger.error("Error: no suggestion available at index 0.");
     return 1;
   }
 
@@ -623,13 +626,13 @@ export async function cmdImprove(
       constraints: [],
     }));
   } catch (err) {
-    console.error(formatOperationError(`negotiate goal "${selected.title}"`, err));
+    logger.error(formatOperationError(`negotiate goal "${selected.title}"`, err));
     return 1;
   }
 
   const responseType = (response as { type: string }).type;
   if (responseType === "reject") {
-    console.error(`Goal negotiation rejected: ${response.message}`);
+    logger.error(`Goal negotiation rejected: ${response.message}`);
     return 1;
   }
 
@@ -642,7 +645,7 @@ export async function cmdImprove(
     try {
       await deps.coreLoop.run(goal.id);
     } catch (err) {
-      console.error(formatOperationError(`run improvement loop for goal "${goal.id}"`, err));
+      logger.error(formatOperationError(`run improvement loop for goal "${goal.id}"`, err));
       return 1;
     }
     console.log(`[Motiva Improve] Loop completed for goal ${goal.id}`);

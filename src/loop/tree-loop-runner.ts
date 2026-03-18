@@ -25,7 +25,7 @@ export async function runTreeIteration(
       logger?.info("CoreLoop: auto-decomposing goal tree", { rootId });
       const decompResult = await deps.goalTreeManager.decomposeGoal(rootId, defaultConfig);
       logger?.info("CoreLoop: decomposition complete", { rootId, childCount: decompResult.children.length });
-      await deps.treeLoopOrchestrator!.startTreeExecution(rootId, defaultConfig);
+      await deps.treeLoopOrchestrator?.startTreeExecution(rootId, defaultConfig);
     } catch (err) {
       logger?.warn("CoreLoop: decomposition failed, falling back to flat iteration", { rootId, err });
     }
