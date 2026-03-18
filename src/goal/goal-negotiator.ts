@@ -1037,17 +1037,14 @@ export class GoalNegotiator {
       // realistic_target = baseline + (|target - baseline| / feasibility_ratio) * 1.3
       let realisticTarget: number;
       if (infeasible.feasibility_ratio !== null && infeasible.feasibility_ratio > 0) {
-        const gap = infeasible.feasibility_ratio > 0
-          ? (timeHorizonDays * REALISTIC_TARGET_ACCELERATION_FACTOR) / infeasible.feasibility_ratio
-          : 0;
-        // Actually: observed_change_rate = necessary_rate / ratio
+        // observed_change_rate = necessary_rate / feasibility_ratio
         // necessary_rate = |target - baseline| / timeHorizon
-        // observed * timeHorizon * 1.3 = (necessary_rate / ratio) * timeHorizon * 1.3
-        //   = (|target - baseline| / ratio) * 1.3
-        // Not exactly right without knowing the target. Let's use a simpler formula.
-        // From the spec: realistic_target = baseline + (observed_change_rate * timeHorizonDays * 1.3)
-        // observed_change_rate is not available for new goals. Use qualitative fallback.
-        realisticTarget = baselineValue;
+        // realistic_target = baseline + observed_change_rate * timeHorizon * 1.3
+        //   = baseline + (|target - baseline| / feasibility_ratio) * 1.3
+        // Without the original target in scope, approximate via:
+        //   gap = timeHorizonDays * 1.3 / feasibility_ratio (units: days/ratio, a scaled change amount)
+        const gap = (timeHorizonDays * REALISTIC_TARGET_ACCELERATION_FACTOR) / infeasible.feasibility_ratio;
+        realisticTarget = baselineValue + gap;
       } else {
         realisticTarget = baselineValue;
       }
