@@ -2,6 +2,24 @@ import { z } from "zod";
 
 // --- SatisficingJudge types ---
 
+// Convergence detection result (改善3: 収束判定の強化)
+export const SatisficingStatusSchema = z.enum([
+  "satisficed",          // gap < threshold (existing behavior)
+  "converged_satisficed",// variance < ε AND gap ≤ threshold × 1.5 (NEW)
+  "stalled",             // variance < ε AND gap > threshold × 1.5 → delegate to StallDetector (NEW)
+  "in_progress",         // still improving, continue
+]);
+export type SatisficingStatus = z.infer<typeof SatisficingStatusSchema>;
+
+export const ConvergenceJudgmentSchema = z.object({
+  status: SatisficingStatusSchema,
+  gap: z.number(),
+  variance: z.number().nullable(),  // null when fewer than N values in buffer
+  window_size: z.number(),
+  samples_available: z.number(),
+});
+export type ConvergenceJudgment = z.infer<typeof ConvergenceJudgmentSchema>;
+
 export const CompletionJudgmentSchema = z.object({
   is_complete: z.boolean(),
   blocking_dimensions: z.array(z.string()).default([]),

@@ -7,6 +7,8 @@ import type {
   IterationConstraints,
   ThresholdAdjustmentProposal,
   MappingProposal,
+  ConvergenceJudgment,
+  SatisficingStatus,
 } from "../types/satisficing.js";
 import type { IEmbeddingClient } from "../knowledge/embedding-client.js";
 import {
@@ -21,6 +23,12 @@ import {
   propagateSubgoalCompletion as propagateSubgoalCompletionFn,
 } from "./satisficing-propagation.js";
 export { aggregateValues } from "./satisficing-helpers.js";
+
+// ─── Convergence Detection Constants ───
+
+const CONVERGENCE_WINDOW = 5;        // ring buffer size
+const CONVERGENCE_EPSILON = 0.01;    // variance threshold
+const ACCEPTABLE_RANGE_FACTOR = 1.5; // threshold × this = acceptable range ceiling
 
 /**
  * SatisficingJudge implements the completion judgment logic defined in satisficing.md.
@@ -39,6 +47,9 @@ export class SatisficingJudge {
   private readonly embeddingClient?: IEmbeddingClient;
   private readonly onSatisficingJudgment?: (goalId: string, satisfiedDimensions: string[]) => void;
 
+  // Ring buffers keyed by goalId+dimensionName to track recent gap values
+  private readonly gapHistory: Map<string, number[]> = new Map();
+
   constructor(
     stateManager: StateManager,
     embeddingClient?: IEmbeddingClient,  // Phase 2: for dimension mapping proposals
@@ -47,6 +58,76 @@ export class SatisficingJudge {
     this.stateManager = stateManager;
     this.embeddingClient = embeddingClient;
     this.onSatisficingJudgment = onSatisficingJudgment;
+  }
+
+  // ─── Convergence Detection ───
+
+  /**
+   * Compute the variance of an array of numbers. Returns null if fewer than 2 values.
+   */
+  private computeVariance(values: number[]): number | null {
+    if (values.length < 2) return null;
+    const mean = values.reduce((s, v) => s + v, 0) / values.length;
+    const squaredDiffs = values.map((v) => (v - mean) ** 2);
+    return squaredDiffs.reduce((s, v) => s + v, 0) / values.length;
+  }
+
+  /**
+   * Record a gap observation for a goal dimension into the ring buffer.
+   * Pushes the gap value and trims to CONVERGENCE_WINDOW.
+   */
+  private recordGap(key: string, gap: number): void {
+    const buf = this.gapHistory.get(key) ?? [];
+    buf.push(gap);
+    if (buf.length > CONVERGENCE_WINDOW) {
+      buf.shift();
+    }
+    this.gapHistory.set(key, buf);
+  }
+
+  /**
+   * Judge convergence for a single gap value against a threshold.
+   * Records the gap in the ring buffer, then evaluates:
+   *   - gap < threshold → satisficed (existing behavior)
+   *   - variance < ε AND gap ≤ threshold × 1.5 → converged_satisficed
+   *   - variance < ε AND gap > threshold × 1.5 → stalled
+   *   - otherwise → in_progress
+   *
+   * @param key      Unique key for the ring buffer (e.g., `${goalId}:${dimensionName}`)
+   * @param gap      Current normalized gap value [0, 1]
+   * @param threshold The satisficing threshold (normalized gap target, typically 0 means met)
+   */
+  judgeConvergence(key: string, gap: number, threshold: number): ConvergenceJudgment {
+    this.recordGap(key, gap);
+    const buf = this.gapHistory.get(key) ?? [];
+    const variance = this.computeVariance(buf);
+
+    let status: SatisficingStatus;
+
+    if (gap < threshold) {
+      status = "satisficed";
+    } else if (variance !== null && variance < CONVERGENCE_EPSILON) {
+      const acceptableRange = threshold * ACCEPTABLE_RANGE_FACTOR;
+      status = gap <= acceptableRange ? "converged_satisficed" : "stalled";
+    } else {
+      status = "in_progress";
+    }
+
+    return {
+      status,
+      gap,
+      variance,
+      window_size: CONVERGENCE_WINDOW,
+      samples_available: buf.length,
+    };
+  }
+
+  /**
+   * Clear the gap history ring buffer for a specific key.
+   * Call this when a goal is reset or completed.
+   */
+  clearGapHistory(key: string): void {
+    this.gapHistory.delete(key);
   }
 
   // ─── Confidence Tier Helpers ───
