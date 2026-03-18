@@ -1,9 +1,9 @@
 // ─── goal-utils.ts: shared types, patterns, and data-source auto-registration ───
 
-import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { getDatasourcesDir } from "../../utils/paths.js";
-import { writeJsonFileSync } from "../../utils/json-io.js";
+import { writeJsonFile } from "../../utils/json-io.js";
 import { StateManager } from "../../state-manager.js";
 import { getCliLogger } from "../cli-logger.js";
 import { formatOperationError } from "../utils.js";
@@ -90,12 +90,12 @@ export function buildThreshold(spec: RawDimensionSpec): Threshold | null {
 
 // ─── Auto DataSource Registration ───
 
-export function autoRegisterFileExistenceDataSources(
+export async function autoRegisterFileExistenceDataSources(
   stateManager: StateManager,
   dimensions: Array<{ name: string; label?: string }>,
   goalDescription: string,
   goalId: string
-): void {
+): Promise<void> {
   try {
     const fileExistenceDims = dimensions.filter((d) =>
       /_exists$|_file$|file_existence/.test(d.name)
@@ -163,9 +163,7 @@ export function autoRegisterFileExistenceDataSources(
     if (Object.keys(dimensionMapping).length === 0) return;
 
     const datasourcesDir = getDatasourcesDir(stateManager.getBaseDir());
-    if (!fs.existsSync(datasourcesDir)) {
-      fs.mkdirSync(datasourcesDir, { recursive: true });
-    }
+    await fsp.mkdir(datasourcesDir, { recursive: true });
 
     const id = `ds_auto_${Date.now()}`;
     const config = {
@@ -180,7 +178,7 @@ export function autoRegisterFileExistenceDataSources(
     };
 
     const configPath = path.join(datasourcesDir, `${id}.json`);
-    writeJsonFileSync(configPath, config);
+    await writeJsonFile(configPath, config);
 
     console.log(
       `[auto] Registered FileExistenceDataSource for: ${Object.keys(dimensionMapping).join(", ")}`
@@ -190,11 +188,11 @@ export function autoRegisterFileExistenceDataSources(
   }
 }
 
-export function autoRegisterShellDataSources(
+export async function autoRegisterShellDataSources(
   stateManager: StateManager,
   dimensions: Array<{ name: string }>,
   goalId: string
-): void {
+): Promise<void> {
   try {
     // Collect dimensions that match known shell patterns
     const matchedCommands: Record<string, ShellCommandConfig> = {};
@@ -208,9 +206,7 @@ export function autoRegisterShellDataSources(
     if (Object.keys(matchedCommands).length === 0) return;
 
     const datasourcesDir = getDatasourcesDir(stateManager.getBaseDir());
-    if (!fs.existsSync(datasourcesDir)) {
-      fs.mkdirSync(datasourcesDir, { recursive: true });
-    }
+    await fsp.mkdir(datasourcesDir, { recursive: true });
 
     const id = `ds_auto_shell_${Date.now()}`;
 
@@ -233,7 +229,7 @@ export function autoRegisterShellDataSources(
     };
 
     const configPath = path.join(datasourcesDir, `${id}.json`);
-    writeJsonFileSync(configPath, config);
+    await writeJsonFile(configPath, config);
 
     console.log(
       `[auto] Registered ShellDataSource for: ${Object.keys(matchedCommands).join(", ")}`

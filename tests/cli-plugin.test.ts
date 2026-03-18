@@ -255,7 +255,7 @@ describe("cmdPluginRemove", () => {
     const pluginDir = path.join(pluginsDir, "removable-plugin");
     writePluginManifest(pluginDir, { name: "removable-plugin" });
 
-    const exitCode = cmdPluginRemove(pluginsDir, ["removable-plugin"]);
+    const exitCode = await cmdPluginRemove(pluginsDir, ["removable-plugin"]);
 
     expect(exitCode).toBe(0);
     expect(fs.existsSync(pluginDir)).toBe(false);
@@ -265,13 +265,13 @@ describe("cmdPluginRemove", () => {
   });
 
   it("returns 1 when plugin does not exist", async () => {
-    const exitCode = cmdPluginRemove(pluginsDir, ["nonexistent-plugin"]);
+    const exitCode = await cmdPluginRemove(pluginsDir, ["nonexistent-plugin"]);
 
     expect(exitCode).toBe(1);
   });
 
   it("returns 1 when name argument is missing", async () => {
-    const exitCode = cmdPluginRemove(pluginsDir, []);
+    const exitCode = await cmdPluginRemove(pluginsDir, []);
 
     expect(exitCode).toBe(1);
   });

@@ -4,7 +4,7 @@ import { StateManager } from "../../state-manager.js";
 import { ReportingEngine } from "../../reporting-engine.js";
 import { getCliLogger } from "../cli-logger.js";
 
-export function cmdReport(stateManager: StateManager, goalId: string): number {
+export async function cmdReport(stateManager: StateManager, goalId: string): Promise<number> {
   const logger = getCliLogger();
   const reportingEngine = new ReportingEngine(stateManager);
 
@@ -14,7 +14,7 @@ export function cmdReport(stateManager: StateManager, goalId: string): number {
     return 1;
   }
 
-  const reports = reportingEngine.listReports(goalId);
+  const reports = await reportingEngine.listReports(goalId);
 
   if (reports.length === 0) {
     console.log(`No reports found for goal "${goalId}".`);

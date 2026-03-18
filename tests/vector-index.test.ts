@@ -101,23 +101,23 @@ describe("VectorIndex", () => {
     await idx.add("id2", "to keep");
     expect(idx.size).toBe(2);
 
-    const removed = idx.remove("id1");
+    const removed = await idx.remove("id1");
     expect(removed).toBe(true);
     expect(idx.size).toBe(1);
     expect(idx.getEntry("id1")).toBeUndefined();
     expect(idx.getEntry("id2")).toBeDefined();
   });
 
-  it("remove() returns false for non-existent id", () => {
+  it("remove() returns false for non-existent id", async () => {
     const idx = new VectorIndex(indexPath, client);
-    expect(idx.remove("nonexistent")).toBe(false);
+    expect(await idx.remove("nonexistent")).toBe(false);
   });
 
   it("remove() persists after removal", async () => {
     const idx = new VectorIndex(indexPath, client);
     await idx.add("id1", "entry one");
     await idx.add("id2", "entry two");
-    idx.remove("id1");
+    await idx.remove("id1");
 
     const raw = fs.readFileSync(indexPath, "utf-8");
     const parsed = JSON.parse(raw) as Array<{ id: string }>;
@@ -147,14 +147,14 @@ describe("VectorIndex", () => {
     await idx.add("id2", "two");
     expect(idx.size).toBe(2);
 
-    idx.clear();
+    await idx.clear();
     expect(idx.size).toBe(0);
   });
 
   it("clear() persists empty state to file", async () => {
     const idx = new VectorIndex(indexPath, client);
     await idx.add("id1", "one");
-    idx.clear();
+    await idx.clear();
 
     const raw = fs.readFileSync(indexPath, "utf-8");
     const parsed = JSON.parse(raw) as unknown[];

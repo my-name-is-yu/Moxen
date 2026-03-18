@@ -1,4 +1,4 @@
-import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 
@@ -52,13 +52,13 @@ function isAllowedExternalPath(filePath: string): boolean {
  * Read an external file if it exists, is allowed, and is within size limit.
  * Returns the content string or null if not readable.
  */
-function readExternalFile(filePath: string, maxBytes: number): string | null {
+async function readExternalFile(filePath: string, maxBytes: number): Promise<string | null> {
   if (!isAllowedExternalPath(filePath)) return null;
   try {
-    const stat = fs.statSync(filePath);
+    const stat = await fsp.stat(filePath);
     if (!stat.isFile()) return null;
     if (stat.size > maxBytes) return null;
-    return fs.readFileSync(filePath, "utf-8");
+    return await fsp.readFile(filePath, "utf-8");
   } catch {
     return null;
   }
@@ -82,11 +82,11 @@ function extractKeywords(text: string): string[] {
     .filter((w) => w.length >= 3 && !STOPWORDS.has(w));
 }
 
-function collectFiles(dir: string, rootDir: string, depth: number, result: string[]): void {
+async function collectFiles(dir: string, rootDir: string, depth: number, result: string[]): Promise<void> {
   if (depth > 3) return;
-  let entries: fs.Dirent[];
+  let entries: import("node:fs").Dirent<string>[];
   try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
+    entries = await fsp.readdir(dir, { withFileTypes: true });
   } catch {
     return;
   }
@@ -95,7 +95,7 @@ function collectFiles(dir: string, rootDir: string, depth: number, result: strin
     if (EXCLUDE_DIRS.has(entry.name)) continue;
     const full = path.join(dir, entry.name);
     if (entry.isDirectory()) {
-      collectFiles(full, rootDir, depth + 1, result);
+      await collectFiles(full, rootDir, depth + 1, result);
     } else if (entry.isFile()) {
       const resolved = path.resolve(full);
       if (resolved.startsWith(resolvedRoot + path.sep) || resolved === resolvedRoot) {
@@ -110,9 +110,9 @@ function fileMatchesKeywords(filePath: string, keywords: string[]): boolean {
   return keywords.some((kw) => name.includes(kw));
 }
 
-function fileContentMatchesKeywords(filePath: string, keywords: string[]): boolean {
+async function fileContentMatchesKeywords(filePath: string, keywords: string[]): Promise<boolean> {
   try {
-    const raw = fs.readFileSync(filePath, "utf-8");
+    const raw = await fsp.readFile(filePath, "utf-8");
     const content = raw.slice(0, 20480).toLowerCase();
     return keywords.some((kw) => content.includes(kw));
   } catch {
@@ -120,9 +120,9 @@ function fileContentMatchesKeywords(filePath: string, keywords: string[]): boole
   }
 }
 
-function readFileSection(filePath: string, maxChars: number): string {
+async function readFileSection(filePath: string, maxChars: number): Promise<string> {
   try {
-    const content = fs.readFileSync(filePath, "utf-8");
+    const content = await fsp.readFile(filePath, "utf-8");
     return content.slice(0, maxChars);
   } catch {
     return "";
@@ -144,7 +144,7 @@ export function createWorkspaceContextProvider(
     // Read external absolute-path files mentioned in goal description
     const externalPaths = extractAbsolutePaths(goalDescription);
     for (const extPath of externalPaths) {
-      const content = readExternalFile(extPath, externalFileMaxBytes);
+      const content = await readExternalFile(extPath, externalFileMaxBytes);
       if (content !== null) {
         parts.push(`## External file: ${extPath}\n\`\`\`\n${content}\n\`\`\``);
       }
@@ -152,7 +152,7 @@ export function createWorkspaceContextProvider(
 
     // Directory listing
     try {
-      const entries = fs.readdirSync(workDir);
+      const entries = await fsp.readdir(workDir);
       parts.push(`## Directory listing\n${entries.join(", ")}`);
     } catch {
       /* skip */
@@ -160,23 +160,33 @@ export function createWorkspaceContextProvider(
 
     // Always-include candidates
     const alwaysInclude = ["README.md", "package.json"];
-    const alwaysIncludePaths = alwaysInclude
-      .map((rel) => path.join(workDir, rel))
-      .filter((fp) => {
-        try { fs.accessSync(fp); return true; } catch { return false; }
-      });
+    const alwaysIncludePaths: string[] = [];
+    for (const rel of alwaysInclude) {
+      const fp = path.join(workDir, rel);
+      try {
+        await fsp.access(fp);
+        alwaysIncludePaths.push(fp);
+      } catch {
+        // not accessible
+      }
+    }
 
     // Relative path exact-match: files explicitly mentioned in goal description
     const relativePathsInGoal = extractRelativePaths(goalDescription);
-    const pathMatchedPaths = relativePathsInGoal
-      .map((rel) => path.join(workDir, rel))
-      .filter((fp) => {
-        try { fs.accessSync(fp); return true; } catch { return false; }
-      });
+    const pathMatchedPaths: string[] = [];
+    for (const rel of relativePathsInGoal) {
+      const fp = path.join(workDir, rel);
+      try {
+        await fsp.access(fp);
+        pathMatchedPaths.push(fp);
+      } catch {
+        // not accessible
+      }
+    }
 
     // Collect all files (depth 3)
     const allFiles: string[] = [];
-    collectFiles(workDir, workDir, 0, allFiles);
+    await collectFiles(workDir, workDir, 0, allFiles);
 
     // Separate already-included from candidates
     const alwaysSet = new Set(alwaysIncludePaths);
@@ -194,7 +204,10 @@ export function createWorkspaceContextProvider(
 
     if (selected.length < neededFromCandidates) {
       const remaining = candidates.filter((fp) => !selected.includes(fp));
-      const contentMatched = remaining.filter((fp) => fileContentMatchesKeywords(fp, keywords));
+      const contentMatchResults = await Promise.all(
+        remaining.map(async (fp) => ({ fp, match: await fileContentMatchesKeywords(fp, keywords) }))
+      );
+      const contentMatched = contentMatchResults.filter((r) => r.match).map((r) => r.fp);
       selected = [
         ...selected,
         ...contentMatched.slice(0, neededFromCandidates - selected.length),
@@ -204,7 +217,7 @@ export function createWorkspaceContextProvider(
     // Read always-include files first
     for (const fp of alwaysIncludePaths) {
       const rel = path.relative(workDir, fp);
-      const content = readFileSection(fp, maxCharsPerFile);
+      const content = await readFileSection(fp, maxCharsPerFile);
       if (content) {
         parts.push(`## ${rel}\n\`\`\`\n${content}\n\`\`\``);
       }
@@ -213,7 +226,7 @@ export function createWorkspaceContextProvider(
     // Read explicit path-matched files (priority, same as alwaysInclude)
     for (const fp of pathMatchedPaths) {
       const rel = path.relative(workDir, fp);
-      const content = readFileSection(fp, maxCharsPerFile);
+      const content = await readFileSection(fp, maxCharsPerFile);
       if (content) {
         parts.push(`## ${rel}\n\`\`\`\n${content}\n\`\`\``);
       }
@@ -222,7 +235,7 @@ export function createWorkspaceContextProvider(
     // Read selected keyword-matched files
     for (const fp of selected) {
       const rel = path.relative(workDir, fp);
-      const content = readFileSection(fp, maxCharsPerFile);
+      const content = await readFileSection(fp, maxCharsPerFile);
       if (content) {
         parts.push(`## ${rel}\n\`\`\`\n${content}\n\`\`\``);
       }

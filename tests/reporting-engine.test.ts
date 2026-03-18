@@ -140,35 +140,35 @@ describe("generateExecutionSummary", () => {
 // ─── saveReport / getReport ───
 
 describe("saveReport / getReport", () => {
-  it("saves and retrieves a report by id", () => {
+  it("saves and retrieves a report by id", async () => {
     const report = engine.generateExecutionSummary(makeBaseParams());
-    engine.saveReport(report);
-    const loaded = engine.getReport(report.id);
+    await engine.saveReport(report);
+    const loaded = await engine.getReport(report.id);
     expect(loaded).not.toBeNull();
     expect(loaded!.id).toBe(report.id);
     expect(loaded!.title).toBe(report.title);
   });
 
-  it("returns null for a non-existent report id", () => {
-    const result = engine.getReport("nonexistent-id");
+  it("returns null for a non-existent report id", async () => {
+    const result = await engine.getReport("nonexistent-id");
     expect(result).toBeNull();
   });
 
-  it("persists report to disk under reports/<goalId>/<reportId>.json", () => {
+  it("persists report to disk under reports/<goalId>/<reportId>.json", async () => {
     const report = engine.generateExecutionSummary(makeBaseParams({ goalId: "goal-persist" }));
-    engine.saveReport(report);
+    await engine.saveReport(report);
     const expectedPath = path.join(tempDir, "reports", "goal-persist", `${report.id}.json`);
     expect(fs.existsSync(expectedPath)).toBe(true);
   });
 
-  it("round-trips notification report through save/get", () => {
+  it("round-trips notification report through save/get", async () => {
     const report = engine.generateNotification("urgent", {
       goalId: "goal-001",
       message: "Critical failure",
       details: "Something went wrong",
     });
-    engine.saveReport(report);
-    const loaded = engine.getReport(report.id);
+    await engine.saveReport(report);
+    const loaded = await engine.getReport(report.id);
     expect(loaded).not.toBeNull();
     expect(loaded!.report_type).toBe("urgent_alert");
     expect(loaded!.content).toContain("Critical failure");
@@ -178,48 +178,45 @@ describe("saveReport / getReport", () => {
 // ─── listReports ───
 
 describe("listReports", () => {
-  it("returns empty array when no reports saved", () => {
-    expect(engine.listReports()).toHaveLength(0);
+  it("returns empty array when no reports saved", async () => {
+    expect(await engine.listReports()).toHaveLength(0);
   });
 
-  it("returns all saved reports", () => {
+  it("returns all saved reports", async () => {
     const r1 = engine.generateExecutionSummary(makeBaseParams({ goalId: "goal-a" }));
     const r2 = engine.generateExecutionSummary(makeBaseParams({ goalId: "goal-b" }));
-    engine.saveReport(r1);
-    engine.saveReport(r2);
-    const all = engine.listReports();
+    await engine.saveReport(r1);
+    await engine.saveReport(r2);
+    const all = await engine.listReports();
     expect(all.length).toBe(2);
   });
 
-  it("filters by goalId when provided", () => {
+  it("filters by goalId when provided", async () => {
     const r1 = engine.generateExecutionSummary(makeBaseParams({ goalId: "goal-a" }));
     const r2 = engine.generateExecutionSummary(makeBaseParams({ goalId: "goal-b" }));
-    engine.saveReport(r1);
-    engine.saveReport(r2);
-    const goalA = engine.listReports("goal-a");
+    await engine.saveReport(r1);
+    await engine.saveReport(r2);
+    const goalA = await engine.listReports("goal-a");
     expect(goalA).toHaveLength(1);
     expect(goalA[0].goal_id).toBe("goal-a");
   });
 
-  it("returns empty array for goalId with no reports", () => {
+  it("returns empty array for goalId with no reports", async () => {
     const r1 = engine.generateExecutionSummary(makeBaseParams({ goalId: "goal-a" }));
-    engine.saveReport(r1);
-    expect(engine.listReports("goal-b")).toHaveLength(0);
+    await engine.saveReport(r1);
+    expect(await engine.listReports("goal-b")).toHaveLength(0);
   });
 
-  it("returns reports sorted by generated_at ascending", () => {
-    // Save multiple reports and verify order
+  it("returns reports sorted by generated_at ascending", async () => {
     const r1 = engine.generateExecutionSummary(makeBaseParams({ loopIndex: 1 }));
-    engine.saveReport(r1);
+    await engine.saveReport(r1);
     const r2 = engine.generateExecutionSummary(makeBaseParams({ loopIndex: 2 }));
-    engine.saveReport(r2);
+    await engine.saveReport(r2);
     const r3 = engine.generateExecutionSummary(makeBaseParams({ loopIndex: 3 }));
-    engine.saveReport(r3);
+    await engine.saveReport(r3);
 
-    const all = engine.listReports("goal-001");
-    // All generated in same millisecond during test — check they're all present
+    const all = await engine.listReports("goal-001");
     expect(all.length).toBe(3);
-    // Verify sorted order (generated_at should be non-decreasing)
     for (let i = 1; i < all.length; i++) {
       expect(all[i].generated_at >= all[i - 1].generated_at).toBe(true);
     }
@@ -251,17 +248,17 @@ describe("formatForCLI", () => {
     expect(formatted).toContain("no task");
   });
 
-  it("formats daily summary compactly", () => {
-    const report = engine.generateDailySummary("goal-001");
-    engine.saveReport(report);
+  it("formats daily summary compactly", async () => {
+    const report = await engine.generateDailySummary("goal-001");
+    await engine.saveReport(report);
     const formatted = engine.formatForCLI(report);
     expect(formatted).toContain("[Daily");
     expect(formatted).toContain("goal-001");
     expect(formatted).toContain("loops");
   });
 
-  it("formats weekly report compactly", () => {
-    const report = engine.generateWeeklyReport("goal-001");
+  it("formats weekly report compactly", async () => {
+    const report = await engine.generateWeeklyReport("goal-001");
     const formatted = engine.formatForCLI(report);
     expect(formatted).toContain("[Weekly");
     expect(formatted).toContain("goal-001");
@@ -379,85 +376,84 @@ describe("generateNotification", () => {
 // ─── generateDailySummary ───
 
 describe("generateDailySummary", () => {
-  it("returns daily_summary report type", () => {
-    const report = engine.generateDailySummary("goal-001");
+  it("returns daily_summary report type", async () => {
+    const report = await engine.generateDailySummary("goal-001");
     expect(report.report_type).toBe("daily_summary");
   });
 
-  it("title includes today's date", () => {
+  it("title includes today's date", async () => {
     const today = new Date().toISOString().slice(0, 10);
-    const report = engine.generateDailySummary("goal-001");
+    const report = await engine.generateDailySummary("goal-001");
     expect(report.title).toContain(today);
   });
 
-  it("shows 0 loops when no execution summaries saved today", () => {
-    const report = engine.generateDailySummary("goal-001");
+  it("shows 0 loops when no execution summaries saved today", async () => {
+    const report = await engine.generateDailySummary("goal-001");
     expect(report.content).toContain("**Loops run**: 0");
     expect(report.content).toContain("N/A");
   });
 
-  it("counts loops from saved execution summaries", () => {
-    // Save 3 execution summaries
+  it("counts loops from saved execution summaries", async () => {
     for (let i = 1; i <= 3; i++) {
       const r = engine.generateExecutionSummary(makeBaseParams({ loopIndex: i }));
-      engine.saveReport(r);
+      await engine.saveReport(r);
     }
-    const report = engine.generateDailySummary("goal-001");
+    const report = await engine.generateDailySummary("goal-001");
     expect(report.content).toContain("**Loops run**: 3");
   });
 
-  it("counts stalls correctly", () => {
+  it("counts stalls correctly", async () => {
     const r1 = engine.generateExecutionSummary(makeBaseParams({ stallDetected: true }));
     const r2 = engine.generateExecutionSummary(makeBaseParams({ stallDetected: false }));
     const r3 = engine.generateExecutionSummary(makeBaseParams({ stallDetected: true }));
-    engine.saveReport(r1);
-    engine.saveReport(r2);
-    engine.saveReport(r3);
-    const report = engine.generateDailySummary("goal-001");
+    await engine.saveReport(r1);
+    await engine.saveReport(r2);
+    await engine.saveReport(r3);
+    const report = await engine.generateDailySummary("goal-001");
     expect(report.content).toContain("**Stalls detected**: 2");
   });
 
-  it("counts pivots correctly", () => {
+  it("counts pivots correctly", async () => {
     const r1 = engine.generateExecutionSummary(makeBaseParams({ pivotOccurred: true }));
     const r2 = engine.generateExecutionSummary(makeBaseParams({ pivotOccurred: true }));
-    engine.saveReport(r1);
-    engine.saveReport(r2);
-    const report = engine.generateDailySummary("goal-001");
+    await engine.saveReport(r1);
+    await engine.saveReport(r2);
+    const report = await engine.generateDailySummary("goal-001");
     expect(report.content).toContain("**Strategy pivots**: 2");
   });
 
-  it("computes gap reduction when gap decreases", () => {
+  it("computes gap reduction when gap decreases", async () => {
     const t0 = Date.now();
     vi.setSystemTime(t0);
     const r1 = engine.generateExecutionSummary(makeBaseParams({ gapAggregate: 0.8, loopIndex: 1 }));
-    engine.saveReport(r1);
+    await engine.saveReport(r1);
     vi.setSystemTime(t0 + 1);
     const r2 = engine.generateExecutionSummary(makeBaseParams({ gapAggregate: 0.5, loopIndex: 2 }));
-    engine.saveReport(r2);
+    await engine.saveReport(r2);
     vi.useRealTimers();
-    const report = engine.generateDailySummary("goal-001");
+    const report = await engine.generateDailySummary("goal-001");
     expect(report.content).toContain("gap reduced");
   });
 
-  it("computes gap growth when gap increases", () => {
+  it("computes gap growth when gap increases", async () => {
     const t0 = Date.now();
     vi.setSystemTime(t0);
     const r1 = engine.generateExecutionSummary(makeBaseParams({ gapAggregate: 0.3, loopIndex: 1 }));
-    engine.saveReport(r1);
+    await engine.saveReport(r1);
     vi.setSystemTime(t0 + 1);
     const r2 = engine.generateExecutionSummary(makeBaseParams({ gapAggregate: 0.7, loopIndex: 2 }));
-    engine.saveReport(r2);
+    await engine.saveReport(r2);
     vi.useRealTimers();
-    const report = engine.generateDailySummary("goal-001");
+    const report = await engine.generateDailySummary("goal-001");
     expect(report.content).toContain("gap grew");
   });
 
-  it("only counts summaries from goal matching goalId", () => {
+  it("only counts summaries from goal matching goalId", async () => {
     const r1 = engine.generateExecutionSummary(makeBaseParams({ goalId: "goal-001" }));
     const r2 = engine.generateExecutionSummary(makeBaseParams({ goalId: "goal-002" }));
-    engine.saveReport(r1);
-    engine.saveReport(r2);
-    const report = engine.generateDailySummary("goal-001");
+    await engine.saveReport(r1);
+    await engine.saveReport(r2);
+    const report = await engine.generateDailySummary("goal-001");
     expect(report.content).toContain("**Loops run**: 1");
   });
 });
@@ -465,49 +461,47 @@ describe("generateDailySummary", () => {
 // ─── generateWeeklyReport ───
 
 describe("generateWeeklyReport", () => {
-  it("returns weekly_report report type", () => {
-    const report = engine.generateWeeklyReport("goal-001");
+  it("returns weekly_report report type", async () => {
+    const report = await engine.generateWeeklyReport("goal-001");
     expect(report.report_type).toBe("weekly_report");
   });
 
-  it("title includes today's date", () => {
+  it("title includes today's date", async () => {
     const today = new Date().toISOString().slice(0, 10);
-    const report = engine.generateWeeklyReport("goal-001");
+    const report = await engine.generateWeeklyReport("goal-001");
     expect(report.title).toContain(today);
   });
 
-  it("shows 0 days with activity when no daily summaries saved", () => {
-    const report = engine.generateWeeklyReport("goal-001");
+  it("shows 0 days with activity when no daily summaries saved", async () => {
+    const report = await engine.generateWeeklyReport("goal-001");
     expect(report.content).toContain("**Days with activity**: 0");
     expect(report.content).toContain("No daily activity");
   });
 
-  it("aggregates daily summaries into total loops", () => {
-    // Generate and save 2 daily summaries with known loop counts
-    // by first saving execution summaries, then generating daily summaries
+  it("aggregates daily summaries into total loops", async () => {
     for (let i = 1; i <= 3; i++) {
       const r = engine.generateExecutionSummary(makeBaseParams({ loopIndex: i }));
-      engine.saveReport(r);
+      await engine.saveReport(r);
     }
-    const daily = engine.generateDailySummary("goal-001");
-    engine.saveReport(daily);
+    const daily = await engine.generateDailySummary("goal-001");
+    await engine.saveReport(daily);
 
-    const weekly = engine.generateWeeklyReport("goal-001");
+    const weekly = await engine.generateWeeklyReport("goal-001");
     expect(weekly.content).toContain("**Days with activity**: 1");
     expect(weekly.content).toContain("**Total loops run**: 3");
   });
 
-  it("includes daily trend section", () => {
-    const daily = engine.generateDailySummary("goal-001");
-    engine.saveReport(daily);
+  it("includes daily trend section", async () => {
+    const daily = await engine.generateDailySummary("goal-001");
+    await engine.saveReport(daily);
 
-    const weekly = engine.generateWeeklyReport("goal-001");
+    const weekly = await engine.generateWeeklyReport("goal-001");
     expect(weekly.content).toContain("### Daily Trend");
     expect(weekly.content).not.toContain("No daily activity");
   });
 
-  it("includes period information", () => {
-    const report = engine.generateWeeklyReport("goal-001");
+  it("includes period information", async () => {
+    const report = await engine.generateWeeklyReport("goal-001");
     expect(report.content).toContain("Last 7 days");
   });
 });
@@ -515,23 +509,23 @@ describe("generateWeeklyReport", () => {
 // ─── Edge cases ───
 
 describe("edge cases", () => {
-  it("getReport returns null when store is empty", () => {
-    expect(engine.getReport("any-id")).toBeNull();
+  it("getReport returns null when store is empty", async () => {
+    expect(await engine.getReport("any-id")).toBeNull();
   });
 
-  it("listReports with no reports returns empty array", () => {
-    expect(engine.listReports()).toEqual([]);
-    expect(engine.listReports("goal-001")).toEqual([]);
+  it("listReports with no reports returns empty array", async () => {
+    expect(await engine.listReports()).toEqual([]);
+    expect(await engine.listReports("goal-001")).toEqual([]);
   });
 
-  it("multiple reports for multiple goals are retrievable independently", () => {
+  it("multiple reports for multiple goals are retrievable independently", async () => {
     const goals = ["goal-a", "goal-b", "goal-c"];
     for (const g of goals) {
       const r = engine.generateExecutionSummary(makeBaseParams({ goalId: g }));
-      engine.saveReport(r);
+      await engine.saveReport(r);
     }
     for (const g of goals) {
-      const reports = engine.listReports(g);
+      const reports = await engine.listReports(g);
       expect(reports).toHaveLength(1);
       expect(reports[0].goal_id).toBe(g);
     }
@@ -551,13 +545,12 @@ describe("edge cases", () => {
       goalId: "goal-001",
       message: "Done",
     });
-    // Override goal_id to simulate null (not possible via normal API, so test fallback string)
     const modified: Report = { ...report, goal_id: null };
     const formatted = engine.formatForCLI(modified);
     expect(formatted).toContain("no goal");
   });
 
-  it("saveReport / getReport round-trips all notification types", () => {
+  it("saveReport / getReport round-trips all notification types", async () => {
     const types: Array<Parameters<ReportingEngine["generateNotification"]>[0]> = [
       "urgent",
       "approval_required",
@@ -570,17 +563,17 @@ describe("edge cases", () => {
         goalId: "goal-round-trip",
         message: `Test ${t}`,
       });
-      engine.saveReport(report);
-      const loaded = engine.getReport(report.id);
+      await engine.saveReport(report);
+      const loaded = await engine.getReport(report.id);
       expect(loaded).not.toBeNull();
       expect(loaded!.report_type).toBe(report.report_type);
     }
   });
 
-  it("generateDailySummary with single loop shows 'Single loop' message", () => {
+  it("generateDailySummary with single loop shows 'Single loop' message", async () => {
     const r = engine.generateExecutionSummary(makeBaseParams({ loopIndex: 1 }));
-    engine.saveReport(r);
-    const daily = engine.generateDailySummary("goal-001");
+    await engine.saveReport(r);
+    const daily = await engine.generateDailySummary("goal-001");
     expect(daily.content).toContain("Single loop");
   });
 });
@@ -592,14 +585,12 @@ describe("CharacterConfig — constructor", () => {
     const eng = new ReportingEngine(stateManager);
     const report = eng.generateExecutionSummary(makeBaseParams());
     expect(report.report_type).toBe("execution_summary");
-    // Default proactivity=2 → normal mode → full format preserved
     expect(report.content).toContain("## Execution Summary");
     expect(report.content).toContain("### Observation Results");
   });
 
   it("default config (proactivity=2) preserves existing detailed behavior", () => {
     const eng = new ReportingEngine(stateManager);
-    // Default proactivity=2 maps to normal (full format) — backwards compatible
     const report = eng.generateExecutionSummary(makeBaseParams());
     expect(report.content).toContain("## Execution Summary");
     expect(report.content).toContain("### Observation Results");
@@ -620,10 +611,8 @@ describe("CharacterConfig — proactivity_level (execution summary verbosity)", 
       pivotOccurred: false,
       taskResult: { taskId: "t1", action: "run", dimension: "dim" },
     }));
-    // Brief content should not contain full markdown headers
     expect(report.content).not.toContain("## Execution Summary");
     expect(report.content).not.toContain("### Observation Results");
-    // Should contain essential info
     expect(report.content).toContain("Loop 1");
     expect(report.content).toContain("gap:");
   });
@@ -671,7 +660,6 @@ describe("CharacterConfig — proactivity_level (execution summary verbosity)", 
       pivotOccurred: false,
       taskResult: { taskId: "t1", action: "run", dimension: "dim" },
     }));
-    // Force detailed because stall is structural event
     expect(report.content).toContain("## Execution Summary");
     expect(report.content).toContain("**Stall detected**: Yes");
     expect(report.content).toContain("### Observation Results");
@@ -724,7 +712,6 @@ describe("CharacterConfig — proactivity_level (execution summary verbosity)", 
       pivotOccurred: false,
       taskResult: { taskId: "t1", action: "run", dimension: "test_coverage" },
     }));
-    // Brief mode still shows dimension names in compact format
     expect(report.content).toContain("test_coverage");
     expect(report.content).toContain("build_pass");
   });
@@ -812,12 +799,6 @@ describe("CharacterConfig — communication_directness (notification suggestions
   });
 
   it("directness=3 (balanced): stall_escalation includes suggestions section", () => {
-    // stall_escalation IS an escalation (isEscalation=true, isStall=true)
-    // directness=3: suggest only for escalation where !isStall — so stall_escalation should NOT have suggestions
-    // Wait, the spec says directness=3: "Append suggestions only for escalation notifications"
-    // stall_escalation type maps to isEscalation=true AND isStall=true
-    // The code excludes stall from directness=3 suggestions.
-    // So directness=3 + stall_escalation => NO suggestions
     const config: CharacterConfig = {
       caution_level: 2,
       stall_flexibility: 1,
@@ -833,7 +814,6 @@ describe("CharacterConfig — communication_directness (notification suggestions
   });
 
   it("directness=3 (balanced): capability_insufficient notification includes suggestions", () => {
-    // capability_insufficient: isEscalation=true, isStall=false → directness=3 should include suggestions
     const config: CharacterConfig = {
       caution_level: 2,
       stall_flexibility: 1,
@@ -864,8 +844,6 @@ describe("CharacterConfig — communication_directness (notification suggestions
   });
 
   it("default config (directness=3): escalation has suggestions, stall does not", () => {
-    // Default directness=3: capability_insufficient (escalation, not stall) → suggestions
-    //                        stall_escalation (stall) → no suggestions
     const eng = new ReportingEngine(stateManager);
     const escalation = eng.generateNotification("capability_insufficient", {
       goalId: "goal-001",

@@ -455,7 +455,7 @@ describe("escalateToUser", () => {
 
     await detector.escalateToUser(makeGap(), "goal-001");
 
-    const reports = reportingEngine.listReports("goal-001");
+    const reports = await reportingEngine.listReports("goal-001");
     expect(reports).toHaveLength(1);
     expect(reports[0]!.report_type).toBe("capability_escalation");
   });
@@ -466,7 +466,7 @@ describe("escalateToUser", () => {
 
     await detector.escalateToUser(makeGap(), "goal-001");
 
-    const reports = reportingEngine.listReports("goal-001");
+    const reports = await reportingEngine.listReports("goal-001");
     expect(reports[0]!.title).toContain("Stripe API");
     expect(reports[0]!.title).toContain("service");
   });
@@ -477,7 +477,7 @@ describe("escalateToUser", () => {
 
     await detector.escalateToUser(makeGap(), "goal-001");
 
-    const reports = reportingEngine.listReports("goal-001");
+    const reports = await reportingEngine.listReports("goal-001");
     expect(reports[0]!.content).toContain("Task requires Stripe payment data");
   });
 
@@ -487,7 +487,7 @@ describe("escalateToUser", () => {
 
     await detector.escalateToUser(makeGap(), "goal-001");
 
-    const reports = reportingEngine.listReports("goal-001");
+    const reports = await reportingEngine.listReports("goal-001");
     expect(reports[0]!.content).toContain("Use cached data");
     expect(reports[0]!.content).toContain("Request CSV export");
   });
@@ -498,7 +498,7 @@ describe("escalateToUser", () => {
 
     await detector.escalateToUser(makeGap(), "goal-001");
 
-    const reports = reportingEngine.listReports("goal-001");
+    const reports = await reportingEngine.listReports("goal-001");
     expect(reports[0]!.content).toContain("Cannot fetch live payment data");
   });
 
@@ -508,7 +508,7 @@ describe("escalateToUser", () => {
 
     await detector.escalateToUser(makeGap({ related_task_id: "task-stripe-999" }), "goal-001");
 
-    const reports = reportingEngine.listReports("goal-001");
+    const reports = await reportingEngine.listReports("goal-001");
     expect(reports[0]!.content).toContain("task-stripe-999");
   });
 
@@ -519,7 +519,7 @@ describe("escalateToUser", () => {
     const gap = makeGap({ related_task_id: undefined });
     await detector.escalateToUser(gap, "goal-001");
 
-    const reports = reportingEngine.listReports("goal-001");
+    const reports = await reportingEngine.listReports("goal-001");
     expect(reports[0]!.content).not.toContain("Related Task");
   });
 
@@ -529,7 +529,7 @@ describe("escalateToUser", () => {
 
     await detector.escalateToUser(makeGap(), "goal-xyz");
 
-    const reports = reportingEngine.listReports("goal-xyz");
+    const reports = await reportingEngine.listReports("goal-xyz");
     expect(reports).toHaveLength(1);
     expect(reports[0]!.goal_id).toBe("goal-xyz");
   });
@@ -541,7 +541,7 @@ describe("escalateToUser", () => {
     const gap = makeGap({ alternatives: [] });
     await detector.escalateToUser(gap, "goal-001");
 
-    const reports = reportingEngine.listReports("goal-001");
+    const reports = await reportingEngine.listReports("goal-001");
     expect(reports[0]!.content).toContain("No alternatives identified");
   });
 
@@ -557,7 +557,7 @@ describe("escalateToUser", () => {
     };
     await detector.escalateToUser(gap, "goal-001");
 
-    const reports = reportingEngine.listReports("goal-001");
+    const reports = await reportingEngine.listReports("goal-001");
     expect(reports[0]!.title).toContain("permission");
     expect(reports[0]!.title).toContain("prod_db_read");
   });
@@ -574,7 +574,7 @@ describe("escalateToUser", () => {
     };
     await detector.escalateToUser(gap, "goal-001");
 
-    const reports = reportingEngine.listReports("goal-001");
+    const reports = await reportingEngine.listReports("goal-001");
     expect(reports[0]!.title).toContain("tool");
     expect(reports[0]!.title).toContain("bash_executor");
   });
@@ -593,7 +593,7 @@ describe("detectDeficiency + escalateToUser integration", () => {
 
     await detector.escalateToUser(gap!, "goal-integrated");
 
-    const reports = reportingEngine.listReports("goal-integrated");
+    const reports = await reportingEngine.listReports("goal-integrated");
     expect(reports).toHaveLength(1);
     expect(reports[0]!.report_type).toBe("capability_escalation");
     expect(reports[0]!.content).toContain("Stripe API");

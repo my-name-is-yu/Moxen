@@ -1,10 +1,10 @@
 // ─── motiva config, provider, datasource, and capability commands ───
 
-import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { parseArgs } from "node:util";
 import { getDatasourcesDir } from "../../utils/paths.js";
-import { writeJsonFileSync, readJsonFileSync } from "../../utils/json-io.js";
+import { writeJsonFile, readJsonFile } from "../../utils/json-io.js";
 
 import { StateManager } from "../../state-manager.js";
 import { CharacterConfigManager } from "../../traits/character-config.js";
@@ -27,11 +27,11 @@ export function maskSecrets(config: ProviderConfig): ProviderConfig {
   }) as ProviderConfig;
 }
 
-export function cmdProvider(argv: string[]): number {
+export async function cmdProvider(argv: string[]): Promise<number> {
   const providerSubcommand = argv[0];
 
   if (!providerSubcommand || providerSubcommand === "show") {
-    const config = loadProviderConfig();
+    const config = await loadProviderConfig();
     console.log(JSON.stringify(maskSecrets(config), null, 2));
     return 0;
   }
@@ -69,14 +69,14 @@ export function cmdProvider(argv: string[]): number {
       return 1;
     }
 
-    const current = loadProviderConfig();
+    const current = await loadProviderConfig();
     const updated: ProviderConfig = {
       ...current,
       ...(values.llm ? { llm_provider: values.llm as ProviderConfig["llm_provider"] } : {}),
       ...(values.adapter ? { default_adapter: values.adapter as ProviderConfig["default_adapter"] } : {}),
     };
 
-    saveProviderConfig(updated);
+    await saveProviderConfig(updated);
     console.log("Provider config updated:");
     console.log(JSON.stringify(maskSecrets(updated), null, 2));
     return 0;
@@ -278,12 +278,10 @@ export async function cmdDatasourceAdd(
   };
 
   const datasourcesDir = getDatasourcesDir(stateManager.getBaseDir());
-  if (!fs.existsSync(datasourcesDir)) {
-    fs.mkdirSync(datasourcesDir, { recursive: true });
-  }
+  await fsp.mkdir(datasourcesDir, { recursive: true });
 
   const configPath = path.join(datasourcesDir, `${id}.json`);
-  writeJsonFileSync(configPath, config);
+  await writeJsonFile(configPath, config);
 
   console.log(`Data source registered successfully!`);
   console.log(`  ID:   ${id}`);
@@ -293,17 +291,20 @@ export async function cmdDatasourceAdd(
   return 0;
 }
 
-export function cmdDatasourceList(stateManager: StateManager): number {
+export async function cmdDatasourceList(stateManager: StateManager): Promise<number> {
   const datasourcesDir = getDatasourcesDir(stateManager.getBaseDir());
 
-  if (!fs.existsSync(datasourcesDir)) {
+  let dirExists = false;
+  try { await fsp.access(datasourcesDir); dirExists = true; } catch { /* not found */ }
+
+  if (!dirExists) {
     console.log("No data sources registered. Use `motiva datasource add` to register one.");
     return 0;
   }
 
   let entries: string[];
   try {
-    entries = fs.readdirSync(datasourcesDir);
+    entries = await fsp.readdir(datasourcesDir);
   } catch (err) {
     getCliLogger().error(formatOperationError("read datasources directory", err));
     return 1;
@@ -322,7 +323,7 @@ export function cmdDatasourceList(stateManager: StateManager): number {
 
   for (const file of jsonFiles) {
     try {
-      const cfg = readJsonFileSync<{ id?: string; type?: string; name?: string; enabled?: boolean }>(path.join(datasourcesDir, file));
+      const cfg = await readJsonFile<{ id?: string; type?: string; name?: string; enabled?: boolean }>(path.join(datasourcesDir, file));
       const id = cfg.id ?? file.replace(".json", "");
       const type = cfg.type ?? "unknown";
       const enabled = cfg.enabled !== false ? "yes" : "no";
@@ -336,10 +337,10 @@ export function cmdDatasourceList(stateManager: StateManager): number {
   return 0;
 }
 
-export function cmdDatasourceRemove(
+export async function cmdDatasourceRemove(
   stateManager: StateManager,
   argv: string[]
-): number {
+): Promise<number> {
   const id = argv[0];
   if (!id) {
     getCliLogger().error("Error: id is required. Usage: motiva datasource remove <id>");
@@ -348,12 +349,14 @@ export function cmdDatasourceRemove(
 
   const configPath = path.join(getDatasourcesDir(stateManager.getBaseDir()), `${id}.json`);
 
-  if (!fs.existsSync(configPath)) {
+  try {
+    await fsp.access(configPath);
+  } catch {
     getCliLogger().error(`Error: Data source "${id}" not found.`);
     return 1;
   }
 
-  fs.unlinkSync(configPath);
+  await fsp.unlink(configPath);
   console.log(`Data source "${id}" removed.`);
 
   return 0;
@@ -362,7 +365,7 @@ export function cmdDatasourceRemove(
 // ─── Capability commands ───
 
 export async function cmdCapabilityList(stateManager: StateManager): Promise<number> {
-  const llmClient = buildLLMClient();
+  const llmClient = await buildLLMClient();
   const reportingEngine = new ReportingEngine(stateManager);
   const capabilityDetector = new CapabilityDetector(stateManager, llmClient, reportingEngine);
 
@@ -406,7 +409,7 @@ export async function cmdCapabilityRemove(
     return 1;
   }
 
-  const llmClient = buildLLMClient();
+  const llmClient = await buildLLMClient();
   const reportingEngine = new ReportingEngine(stateManager);
   const capabilityDetector = new CapabilityDetector(stateManager, llmClient, reportingEngine);
 

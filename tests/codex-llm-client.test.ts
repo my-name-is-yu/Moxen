@@ -25,10 +25,17 @@ vi.mock("node:fs", async (importOriginal) => {
   return {
     ...actual,
     mkdtempSync: vi.fn((_prefix: string) => "/tmp/motiva-codex-test123"),
-    existsSync: vi.fn(() => true),
-    readFileSync: vi.fn((_path: string, _encoding: string) => mockTmpContents.value),
-    unlinkSync: vi.fn(),
-    rmdirSync: vi.fn(),
+  };
+});
+
+vi.mock("node:fs/promises", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs/promises")>();
+  return {
+    ...actual,
+    readFile: vi.fn((_path: string, _encoding: string) => Promise.resolve(mockTmpContents.value)),
+    access: vi.fn(() => Promise.resolve()),
+    unlink: vi.fn(() => Promise.resolve()),
+    rmdir: vi.fn(() => Promise.resolve()),
   };
 });
 

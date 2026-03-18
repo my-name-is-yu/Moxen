@@ -4,11 +4,9 @@
 // Reads/writes ~/.motiva/provider.json to configure which LLM provider
 // and default adapter to use. Env vars always take precedence over config file.
 
-import * as fs from "node:fs";
-import * as os from "node:os";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { getMotivaDirPath } from "../utils/paths.js";
-import { readJsonFileSync, writeJsonFileSync } from "../utils/json-io.js";
 
 // ─── Types ───
 
@@ -93,17 +91,20 @@ function resolveAdapter(
  *
  * If no provider.json exists, falls back to env vars and defaults (current behavior).
  */
-export function loadProviderConfig(): ProviderConfig {
+export async function loadProviderConfig(): Promise<ProviderConfig> {
   let fileConfig: Partial<ProviderConfig> = {};
 
-  if (fs.existsSync(PROVIDER_CONFIG_PATH)) {
+  try {
+    await fsp.access(PROVIDER_CONFIG_PATH);
     try {
-      const raw = fs.readFileSync(PROVIDER_CONFIG_PATH, "utf-8");
+      const raw = await fsp.readFile(PROVIDER_CONFIG_PATH, "utf-8");
       fileConfig = JSON.parse(raw) as Partial<ProviderConfig>;
     } catch {
       // If the file is malformed, treat it as empty (fall back to env/defaults)
       fileConfig = {};
     }
+  } catch {
+    // File does not exist — use env/defaults
   }
 
   // Build merged config: file values as base, env vars override
@@ -169,12 +170,10 @@ export function loadProviderConfig(): ProviderConfig {
  * Save provider configuration to ~/.motiva/provider.json.
  * Creates the ~/.motiva directory if it does not exist.
  */
-export function saveProviderConfig(config: ProviderConfig): void {
+export async function saveProviderConfig(config: ProviderConfig): Promise<void> {
   const motivaDir = getMotivaDirPath();
-  if (!fs.existsSync(motivaDir)) {
-    fs.mkdirSync(motivaDir, { recursive: true });
-  }
-  fs.writeFileSync(PROVIDER_CONFIG_PATH, JSON.stringify(config, null, 2) + "\n", "utf-8");
+  await fsp.mkdir(motivaDir, { recursive: true });
+  await fsp.writeFile(PROVIDER_CONFIG_PATH, JSON.stringify(config, null, 2) + "\n", "utf-8");
 }
 
 // Re-export default for tests that need it

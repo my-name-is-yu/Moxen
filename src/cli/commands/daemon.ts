@@ -42,7 +42,7 @@ export async function cmdStart(
     process.exit(1);
   }
 
-  const deps = buildDeps(stateManager, characterConfigManager, apiKey);
+  const deps = await buildDeps(stateManager, characterConfigManager, apiKey);
 
   const pidManager = new PIDManager(deps.stateManager.getBaseDir());
   const logger = new Logger({

@@ -506,12 +506,12 @@ describe("Milestone 5 — Group 2: Drive-based Memory Management", () => {
 
   // ── Test 10: recordToShortTerm persists entry ──
 
-  it("recordToShortTerm persists entry to short-term memory", () => {
+  it("recordToShortTerm persists entry to short-term memory", async () => {
     const llmClient = createSequentialMockLLMClient([]);
     const manager = new MemoryLifecycleManager(tempDir, llmClient);
-    manager.initializeDirectories();
+    await manager.initializeDirectories();
 
-    const entry = manager.recordToShortTerm(
+    const entry = await manager.recordToShortTerm(
       "goal-persist",
       "experience_log",
       { action: "test action", outcome: "success" },
@@ -754,9 +754,9 @@ describe("Milestone 5 — Group 4: Full Integration — Multi-Goal Loop with Kno
 
     // Now set up MemoryLifecycleManager and record an observation
     const memManager = new MemoryLifecycleManager(stateDir, llmClient);
-    memManager.initializeDirectories();
+    await memManager.initializeDirectories();
 
-    const entry = memManager.recordToShortTerm(
+    const entry = await memManager.recordToShortTerm(
       goalId,
       "observation",
       { quality_score: 0.6, reason: "Quality needs improvement" },

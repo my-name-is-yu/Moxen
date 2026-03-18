@@ -435,7 +435,7 @@ export async function cmdSuggest(
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  const providerConfig = loadProviderConfig();
+  const providerConfig = await loadProviderConfig();
   const provider = providerConfig.llm_provider;
   if (!apiKey && provider !== "ollama" && provider !== "openai" && provider !== "codex") {
     logger.error(
@@ -448,9 +448,9 @@ export async function cmdSuggest(
     return 1;
   }
 
-  let deps: ReturnType<typeof buildDeps>;
+  let deps: Awaited<ReturnType<typeof buildDeps>>;
   try {
-    deps = buildDeps(stateManager, characterConfigManager, apiKey);
+    deps = await buildDeps(stateManager, characterConfigManager, apiKey);
   } catch (err) {
     logger.error(formatOperationError("initialise suggest dependencies", err));
     return 1;
@@ -473,7 +473,7 @@ export async function cmdSuggest(
 
   console.log("Generating goal suggestions...\n");
 
-  const capabilityDetectorLlmClient = buildLLMClient();
+  const capabilityDetectorLlmClient = await buildLLMClient();
   const capabilityReportingEngine = new ReportingEngine(stateManager);
   const capabilityDetector = new CapabilityDetector(stateManager, capabilityDetectorLlmClient, capabilityReportingEngine);
 
@@ -539,7 +539,7 @@ export async function cmdImprove(
   console.log(`\n[Motiva Improve] Analyzing ${targetPath}...\n`);
 
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  const providerConfig = loadProviderConfig();
+  const providerConfig = await loadProviderConfig();
   const provider = providerConfig.llm_provider;
   if (!apiKey && provider !== "ollama" && provider !== "openai" && provider !== "codex") {
     logger.error(
@@ -552,9 +552,9 @@ export async function cmdImprove(
     return 1;
   }
 
-  let deps: ReturnType<typeof buildDeps>;
+  let deps: Awaited<ReturnType<typeof buildDeps>>;
   try {
-    deps = buildDeps(stateManager, characterConfigManager, apiKey);
+    deps = await buildDeps(stateManager, characterConfigManager, apiKey);
   } catch (err) {
     logger.error(formatOperationError("initialise improve dependencies", err));
     return 1;

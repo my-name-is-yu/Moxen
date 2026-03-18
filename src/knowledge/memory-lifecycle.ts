@@ -1,4 +1,4 @@
-import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { z } from "zod";
 import type { ILLMClient } from "../llm/llm-client.js";
@@ -23,11 +23,11 @@ import type { IDriveScorer } from "./drive-score-adapter.js";
 export type { IDriveScorer } from "./drive-score-adapter.js";
 export { DriveScoreAdapter } from "./drive-score-adapter.js";
 import {
-  atomicWrite,
+  atomicWriteAsync,
   readJsonFile,
+  readJsonFileAsync,
   getDataFile,
   generateId,
-  getDirectorySize,
   getRetentionLimit,
 } from "./memory-persistence.js";
 import {
@@ -136,7 +136,7 @@ export class MemoryLifecycleManager {
   // ─── Directory Initialization ───
 
   /** Create directory structure for memory storage */
-  initializeDirectories(): void {
+  async initializeDirectories(): Promise<void> {
     const dirs = [
       path.join(this.memoryDir, "short-term", "goals"),
       path.join(this.memoryDir, "long-term", "lessons", "by-goal"),
@@ -145,11 +145,11 @@ export class MemoryLifecycleManager {
       path.join(this.memoryDir, "archive"),
     ];
     for (const dir of dirs) {
-      fs.mkdirSync(dir, { recursive: true });
+      await fsp.mkdir(dir, { recursive: true });
     }
     // Initialize index files if they don't exist
-    initializeIndex(this.memoryDir, "short-term");
-    initializeIndex(this.memoryDir, "long-term");
+    await initializeIndex(this.memoryDir, "short-term");
+    await initializeIndex(this.memoryDir, "long-term");
     // Initialize global lessons file
     const globalPath = path.join(
       this.memoryDir,
@@ -157,8 +157,10 @@ export class MemoryLifecycleManager {
       "lessons",
       "global.json"
     );
-    if (!fs.existsSync(globalPath)) {
-      atomicWrite(globalPath, []);
+    try {
+      await fsp.access(globalPath);
+    } catch {
+      await atomicWriteAsync(globalPath, []);
     }
   }
 
@@ -168,7 +170,7 @@ export class MemoryLifecycleManager {
    * Record an entry to short-term memory.
    * Appends to the appropriate data file and updates the short-term index.
    */
-  recordToShortTerm(
+  async recordToShortTerm(
     goalId: string,
     dataType: MemoryDataType,
     data: Record<string, unknown>,
@@ -177,7 +179,7 @@ export class MemoryLifecycleManager {
       dimensions?: string[];
       tags?: string[];
     }
-  ): ShortTermEntry {
+  ): Promise<ShortTermEntry> {
     // Ensure goal directory exists
     const goalDir = path.join(
       this.memoryDir,
@@ -185,7 +187,7 @@ export class MemoryLifecycleManager {
       "goals",
       goalId
     );
-    fs.mkdirSync(goalDir, { recursive: true });
+    await fsp.mkdir(goalDir, { recursive: true });
 
     const now = new Date().toISOString();
     const entry = ShortTermEntrySchema.parse({
@@ -201,16 +203,16 @@ export class MemoryLifecycleManager {
 
     // Append to appropriate file
     const dataFile = getDataFile(this.memoryDir, goalId, dataType);
-    const existing = readJsonFile<ShortTermEntry[]>(
+    const existing = await readJsonFileAsync<ShortTermEntry[]>(
       dataFile,
       z.array(ShortTermEntrySchema)
     );
     const entries = existing ?? [];
     entries.push(entry);
-    atomicWrite(dataFile, entries);
+    await atomicWriteAsync(dataFile, entries);
 
     // Update short-term index
-    updateIndex(this.memoryDir, "short-term", {
+    await updateIndex(this.memoryDir, "short-term", {
       id: generateId("idx"),
       goal_id: goalId,
       dimensions: entry.dimensions,
@@ -263,12 +265,12 @@ export class MemoryLifecycleManager {
    * Phase 2 (5.2b): semantic search fallback via VectorIndex if tag results are insufficient.
    * Phase 2 (5.2c): includes cross-goal lessons (up to 25% of budget).
    */
-  selectForWorkingMemory(
+  async selectForWorkingMemory(
     goalId: string,
     dimensions: string[],
     tags: string[],
     maxEntries: number = 10
-  ): { shortTerm: ShortTermEntry[]; lessons: LessonEntry[] } {
+  ): Promise<{ shortTerm: ShortTermEntry[]; lessons: LessonEntry[] }> {
     return _selectForWorkingMemory(this.selectionDeps, goalId, dimensions, tags, maxEntries);
   }
 
@@ -443,13 +445,13 @@ export class MemoryLifecycleManager {
     // Step 1: Compress all remaining short-term data (best-effort)
     for (const dataType of dataTypes) {
       const dataFile = getDataFile(this.memoryDir, goalId, dataType);
-      if (!fs.existsSync(dataFile)) continue;
+      try { await fsp.access(dataFile); } catch { continue; }
 
       const entries =
-        readJsonFile<ShortTermEntry[]>(
+        (await readJsonFileAsync<ShortTermEntry[]>(
           dataFile,
           z.array(ShortTermEntrySchema)
-        ) ?? [];
+        )) ?? [];
       if (entries.length === 0) continue;
 
       try {
@@ -469,22 +471,25 @@ export class MemoryLifecycleManager {
     );
     const archiveGoalDir = path.join(this.memoryDir, "archive", goalId);
 
-    if (fs.existsSync(goalShortTermDir)) {
-      fs.mkdirSync(archiveGoalDir, { recursive: true });
+    try {
+      await fsp.access(goalShortTermDir);
+      await fsp.mkdir(archiveGoalDir, { recursive: true });
 
       // Archive all files from the short-term goal directory
-      const files = fs.readdirSync(goalShortTermDir);
+      const files = await fsp.readdir(goalShortTermDir);
       for (const file of files) {
         const srcPath = path.join(goalShortTermDir, file);
         const destPath = path.join(archiveGoalDir, file);
-        fs.copyFileSync(srcPath, destPath);
+        await fsp.copyFile(srcPath, destPath);
       }
 
       // Remove from short-term
-      fs.rmSync(goalShortTermDir, { recursive: true, force: true });
+      await fsp.rm(goalShortTermDir, { recursive: true, force: true });
 
       // Remove goal's entries from short-term index
-      removeGoalFromIndex(this.memoryDir, "short-term", goalId);
+      await removeGoalFromIndex(this.memoryDir, "short-term", goalId);
+    } catch {
+      // goalShortTermDir doesn't exist, nothing to archive
     }
 
     // Step 3: Archive long-term data (lessons + statistics) for this goal
@@ -502,48 +507,57 @@ export class MemoryLifecycleManager {
       `${goalId}.json`
     );
 
-    if (fs.existsSync(byGoalLessonsPath)) {
-      fs.mkdirSync(archiveGoalDir, { recursive: true });
+    try {
+      await fsp.access(byGoalLessonsPath);
+      await fsp.mkdir(archiveGoalDir, { recursive: true });
       const archiveLessonsPath = path.join(archiveGoalDir, "lessons.json");
       const existingArchive =
-        readJsonFile<LessonEntry[]>(
+        (await readJsonFileAsync<LessonEntry[]>(
           archiveLessonsPath,
           z.array(LessonEntrySchema)
-        ) ?? [];
+        )) ?? [];
       const goalLessons =
-        readJsonFile<LessonEntry[]>(
+        (await readJsonFileAsync<LessonEntry[]>(
           byGoalLessonsPath,
           z.array(LessonEntrySchema)
-        ) ?? [];
-      atomicWrite(archiveLessonsPath, [
+        )) ?? [];
+      await atomicWriteAsync(archiveLessonsPath, [
         ...existingArchive,
         ...goalLessons,
       ]);
+    } catch {
+      // byGoalLessonsPath doesn't exist, skip
     }
 
-    if (fs.existsSync(statisticsPath)) {
-      fs.mkdirSync(archiveGoalDir, { recursive: true });
+    try {
+      await fsp.access(statisticsPath);
+      await fsp.mkdir(archiveGoalDir, { recursive: true });
       const archiveStatsPath = path.join(archiveGoalDir, "statistics.json");
-      const stats = readJsonFile<StatisticalSummary>(
+      const stats = await readJsonFileAsync<StatisticalSummary>(
         statisticsPath,
         StatisticalSummarySchema
       );
       if (stats) {
-        atomicWrite(archiveStatsPath, stats);
+        await atomicWriteAsync(archiveStatsPath, stats);
       }
+    } catch {
+      // statisticsPath doesn't exist, skip
     }
 
     // Step 4: Mark all goal lessons as archived in long-term
-    if (fs.existsSync(byGoalLessonsPath)) {
+    try {
+      await fsp.access(byGoalLessonsPath);
       const lessons =
-        readJsonFile<LessonEntry[]>(
+        (await readJsonFileAsync<LessonEntry[]>(
           byGoalLessonsPath,
           z.array(LessonEntrySchema)
-        ) ?? [];
+        )) ?? [];
       const archived = lessons.map((l) =>
         LessonEntrySchema.parse({ ...l, status: "archived" })
       );
-      atomicWrite(byGoalLessonsPath, archived);
+      await atomicWriteAsync(byGoalLessonsPath, archived);
+    } catch {
+      // byGoalLessonsPath doesn't exist, skip
     }
 
     void reason; // used for potential future audit logging
@@ -613,10 +627,10 @@ export {
 } from "./memory-phases.js";
 
 export {
-  atomicWrite,
-  readJsonFile,
+  atomicWriteAsync,
+  readJsonFileAsync,
   getDataFile,
   generateId,
-  getDirectorySize,
+  getDirectorySizeAsync,
   getRetentionLimit,
 } from "./memory-persistence.js";

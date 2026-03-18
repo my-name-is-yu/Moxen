@@ -316,12 +316,12 @@ describe("applyRetentionPolicy with drive-based delays", () => {
       undefined,
       driveScorer
     );
-    mgr.initializeDirectories();
+    await mgr.initializeDirectories();
 
     // Record 150 entries (loop 0..149) — this would trigger without drive delay (>100),
     // but with drive delay (>200) it should NOT trigger.
     for (let i = 0; i < 150; i++) {
-      mgr.recordToShortTerm("goal-a", "experience_log", { test: i }, {
+      await mgr.recordToShortTerm("goal-a", "experience_log", { test: i }, {
         loopNumber: i,
         dimensions: ["dim1"],
       });
@@ -339,10 +339,10 @@ describe("applyRetentionPolicy with drive-based delays", () => {
       createMockLLMClient(llmResponses),
       { default_retention_loops: 50 }
     );
-    mgr.initializeDirectories();
+    await mgr.initializeDirectories();
 
     for (let i = 0; i <= 50; i++) {
-      mgr.recordToShortTerm("goal-a", "experience_log", { test: i }, {
+      await mgr.recordToShortTerm("goal-a", "experience_log", { test: i }, {
         loopNumber: i,
       });
     }
@@ -357,20 +357,20 @@ describe("applyRetentionPolicy with drive-based delays", () => {
 // ═══════════════════════════════════════════════════════
 
 describe("selectForWorkingMemory semantic fallback", () => {
-  it("returns results from tag-match even without VectorIndex", () => {
+  it("returns results from tag-match even without VectorIndex", async () => {
     const mgr = new MemoryLifecycleManager(tmpDir, createMockLLMClient([]));
-    mgr.initializeDirectories();
+    await mgr.initializeDirectories();
 
-    mgr.recordToShortTerm("goal-a", "experience_log", { data: "x" }, {
+    await mgr.recordToShortTerm("goal-a", "experience_log", { data: "x" }, {
       loopNumber: 1,
       tags: ["relevant"],
     });
 
-    const result = mgr.selectForWorkingMemory("goal-a", [], ["relevant"], 10);
+    const result = await mgr.selectForWorkingMemory("goal-a", [], ["relevant"], 10);
     expect(result.shortTerm).toHaveLength(1);
   });
 
-  it("includes additional entries from index when VectorIndex is available and tag results are insufficient", () => {
+  it("includes additional entries from index when VectorIndex is available and tag results are insufficient", async () => {
     const mockVI = makeMockVectorIndex([]);
     const mgr = new MemoryLifecycleManager(
       tmpDir,
@@ -379,24 +379,24 @@ describe("selectForWorkingMemory semantic fallback", () => {
       undefined,
       mockVI
     );
-    mgr.initializeDirectories();
+    await mgr.initializeDirectories();
 
     // Record entries with different tags so tag-match alone won't find all
-    mgr.recordToShortTerm("goal-a", "experience_log", { data: "x" }, {
+    await mgr.recordToShortTerm("goal-a", "experience_log", { data: "x" }, {
       loopNumber: 1,
       tags: ["other-tag"],
     });
-    mgr.recordToShortTerm("goal-a", "experience_log", { data: "y" }, {
+    await mgr.recordToShortTerm("goal-a", "experience_log", { data: "y" }, {
       loopNumber: 2,
       tags: ["relevant"],
     });
 
-    const result = mgr.selectForWorkingMemory("goal-a", [], ["relevant"], 5);
+    const result = await mgr.selectForWorkingMemory("goal-a", [], ["relevant"], 5);
     // With VectorIndex present, we should get the extra entry too
     expect(result.shortTerm.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("deduplicates entries from tag-match and semantic fallback", () => {
+  it("deduplicates entries from tag-match and semantic fallback", async () => {
     const mockVI = makeMockVectorIndex([]);
     const mgr = new MemoryLifecycleManager(
       tmpDir,
@@ -405,14 +405,14 @@ describe("selectForWorkingMemory semantic fallback", () => {
       undefined,
       mockVI
     );
-    mgr.initializeDirectories();
+    await mgr.initializeDirectories();
 
-    mgr.recordToShortTerm("goal-a", "experience_log", { data: "x" }, {
+    await mgr.recordToShortTerm("goal-a", "experience_log", { data: "x" }, {
       loopNumber: 1,
       tags: ["alpha"],
     });
 
-    const result = mgr.selectForWorkingMemory("goal-a", [], ["alpha"], 10);
+    const result = await mgr.selectForWorkingMemory("goal-a", [], ["alpha"], 10);
     // Should not contain duplicates
     const ids = result.shortTerm.map((e) => e.id);
     const uniqueIds = new Set(ids);
@@ -428,9 +428,9 @@ describe("selectForWorkingMemory semantic fallback", () => {
       undefined,
       mockVI
     );
-    mgr.initializeDirectories();
+    await mgr.initializeDirectories();
 
-    mgr.recordToShortTerm("goal-a", "experience_log", { note: "hello world" }, {
+    await mgr.recordToShortTerm("goal-a", "experience_log", { note: "hello world" }, {
       loopNumber: 1,
       tags: ["alpha"],
     });
@@ -456,11 +456,11 @@ describe("searchCrossGoalLessons", () => {
       createMockLLMClient(llmResponses),
       { default_retention_loops: 5 }
     );
-    mgr.initializeDirectories();
+    await mgr.initializeDirectories();
 
     // Add enough entries to trigger compression for goal-a
     for (let i = 0; i <= 5; i++) {
-      mgr.recordToShortTerm("goal-a", "experience_log", { status: "completed" }, {
+      await mgr.recordToShortTerm("goal-a", "experience_log", { status: "completed" }, {
         loopNumber: i,
         tags: ["strategy"],
       });
@@ -469,7 +469,7 @@ describe("searchCrossGoalLessons", () => {
 
     // Add entries for goal-b
     for (let i = 0; i <= 5; i++) {
-      mgr.recordToShortTerm("goal-b", "experience_log", { status: "completed" }, {
+      await mgr.recordToShortTerm("goal-b", "experience_log", { status: "completed" }, {
         loopNumber: i,
         tags: ["strategy"],
       });
@@ -516,7 +516,7 @@ describe("searchCrossGoalLessons", () => {
       undefined,
       mockVI
     );
-    mgr.initializeDirectories();
+    await mgr.initializeDirectories();
 
     // Manually write a lesson to global.json so the manager can find it
     const globalPath = path.join(tmpDir, "memory", "long-term", "lessons", "global.json");
@@ -551,11 +551,11 @@ describe("selectForWorkingMemory includes cross-goal lessons", () => {
       createMockLLMClient(llmResponses),
       { default_retention_loops: 3 }
     );
-    mgr.initializeDirectories();
+    await mgr.initializeDirectories();
 
     // Compress lessons from goal-b
     for (let i = 0; i <= 3; i++) {
-      mgr.recordToShortTerm("goal-b", "experience_log", { data: i }, {
+      await mgr.recordToShortTerm("goal-b", "experience_log", { data: i }, {
         loopNumber: i,
         tags: ["shared-tag"],
       });
@@ -563,7 +563,7 @@ describe("selectForWorkingMemory includes cross-goal lessons", () => {
     await mgr.compressToLongTerm("goal-b", "experience_log");
 
     // Now select for working memory of goal-a with the same tags
-    const result = mgr.selectForWorkingMemory("goal-a", [], ["shared-tag"], 10);
+    const result = await mgr.selectForWorkingMemory("goal-a", [], ["shared-tag"], 10);
 
     // Lessons from goal-b should appear in the result
     expect(result.lessons.length).toBeGreaterThan(0);
@@ -585,10 +585,10 @@ describe("compressToLongTerm auto-registers lessons in VectorIndex", () => {
       undefined,
       mockVI
     );
-    mgr.initializeDirectories();
+    await mgr.initializeDirectories();
 
     for (let i = 0; i <= 3; i++) {
-      mgr.recordToShortTerm("goal-a", "experience_log", { data: i }, {
+      await mgr.recordToShortTerm("goal-a", "experience_log", { data: i }, {
         loopNumber: i,
       });
     }
@@ -621,9 +621,9 @@ describe("Integration: record → embed → search flow", () => {
       undefined,
       mockVI
     );
-    mgr.initializeDirectories();
+    await mgr.initializeDirectories();
 
-    const entry = mgr.recordToShortTerm("goal-a", "experience_log", {
+    const entry = await mgr.recordToShortTerm("goal-a", "experience_log", {
       note: "embedding test"
     }, {
       loopNumber: 1,

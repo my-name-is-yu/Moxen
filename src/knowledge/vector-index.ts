@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import type { IEmbeddingClient } from "./embedding-client.js";
 import type { EmbeddingEntry, VectorSearchResult } from "../types/embedding.js";
@@ -12,7 +13,7 @@ export class VectorIndex {
     private readonly indexPath: string,
     private readonly embeddingClient: IEmbeddingClient
   ) {
-    this._load();
+    this._loadSync();
   }
 
   /**
@@ -33,7 +34,7 @@ export class VectorIndex {
       metadata,
     });
     this.entries.set(id, entry);
-    this._save();
+    await this._save();
     return entry;
   }
 
@@ -78,11 +79,11 @@ export class VectorIndex {
   /**
    * Remove an entry by id. Returns true if removed, false if not found.
    */
-  remove(id: string): boolean {
+  async remove(id: string): Promise<boolean> {
     const existed = this.entries.has(id);
     if (existed) {
       this.entries.delete(id);
-      this._save();
+      await this._save();
     }
     return existed;
   }
@@ -104,12 +105,12 @@ export class VectorIndex {
   /**
    * Remove all entries from the index and persist.
    */
-  clear(): void {
+  async clear(): Promise<void> {
     this.entries.clear();
-    this._save();
+    await this._save();
   }
 
-  private _load(): void {
+  private _loadSync(): void {
     if (!fs.existsSync(this.indexPath)) return;
     try {
       const raw = fs.readFileSync(this.indexPath, "utf-8");
@@ -123,13 +124,13 @@ export class VectorIndex {
     }
   }
 
-  private _save(): void {
+  private async _save(): Promise<void> {
     const dir = path.dirname(this.indexPath);
-    fs.mkdirSync(dir, { recursive: true });
+    await fsp.mkdir(dir, { recursive: true });
 
     const data = JSON.stringify(Array.from(this.entries.values()), null, 2);
     const tmpPath = `${this.indexPath}.tmp`;
-    fs.writeFileSync(tmpPath, data, "utf-8");
-    fs.renameSync(tmpPath, this.indexPath);
+    await fsp.writeFile(tmpPath, data, "utf-8");
+    await fsp.rename(tmpPath, this.indexPath);
   }
 }

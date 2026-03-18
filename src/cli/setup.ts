@@ -2,10 +2,10 @@
 //
 // buildDeps() wires all Motiva dependencies for CLI subcommands.
 
-import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { getMotivaDirPath, getDatasourcesDir } from "../utils/paths.js";
-import { readJsonFileSync } from "../utils/json-io.js";
+import { readJsonFile } from "../utils/json-io.js";
 
 import { StateManager } from "../state-manager.js";
 import type { DataSourceConfig } from "../types/data-source.js";
@@ -43,7 +43,7 @@ import { Logger } from "../runtime/logger.js";
 import { getCliLogger } from "./cli-logger.js";
 import { formatOperationError } from "./utils.js";
 
-export function buildDeps(
+export async function buildDeps(
   stateManager: StateManager,
   characterConfigManager: CharacterConfigManager,
   _apiKey: string | undefined,
@@ -53,7 +53,7 @@ export function buildDeps(
   onProgress?: (event: ProgressEvent) => void
 ) {
   const characterConfig = characterConfigManager.load();
-  const llmClient = buildLLMClient();
+  const llmClient = await buildLLMClient();
   const trustManager = new TrustManager(stateManager);
   const driveSystem = new DriveSystem(stateManager);
 
@@ -61,10 +61,12 @@ export function buildDeps(
   const dsDir = getDatasourcesDir();
   const dataSources: IDataSourceAdapter[] = [];
   try {
-    if (fs.existsSync(dsDir)) {
-      const files = fs.readdirSync(dsDir).filter(f => f.endsWith('.json'));
+    let dsExists = false;
+    try { await fsp.access(dsDir); dsExists = true; } catch { /* not found */ }
+    if (dsExists) {
+      const files = (await fsp.readdir(dsDir)).filter(f => f.endsWith('.json'));
       for (const file of files) {
-        const cfg = readJsonFileSync<DataSourceConfig>(path.join(dsDir, file));
+        const cfg = await readJsonFile<DataSourceConfig>(path.join(dsDir, file));
         if (cfg.type === 'file') {
           dataSources.push(new FileDataSourceAdapter(cfg));
         } else if (cfg.type === 'http_api') {

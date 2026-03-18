@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
@@ -171,7 +172,7 @@ export class CodexLLMClient implements ILLMClient {
 
       child.on("error", (err: Error) => {
         clearTimeout(timeoutHandle);
-        _cleanupTmp(tmpDir, tmpFile);
+        _cleanupTmp(tmpDir, tmpFile).catch(() => {});
         reject(new Error(`CodexLLMClient: spawn error — ${err.message}`));
       });
 
@@ -179,7 +180,7 @@ export class CodexLLMClient implements ILLMClient {
         clearTimeout(timeoutHandle);
 
         if (timedOut) {
-          _cleanupTmp(tmpDir, tmpFile);
+          _cleanupTmp(tmpDir, tmpFile).catch(() => {});
           reject(
             new Error(
               `CodexLLMClient: timed out after ${this.timeoutMs}ms`
@@ -189,7 +190,7 @@ export class CodexLLMClient implements ILLMClient {
         }
 
         if (code !== 0) {
-          _cleanupTmp(tmpDir, tmpFile);
+          _cleanupTmp(tmpDir, tmpFile).catch(() => {});
           const detail = stderrData.trim() ? ` — ${stderrData.trim().slice(0, 500)}` : "";
           reject(
             new Error(
@@ -200,21 +201,19 @@ export class CodexLLMClient implements ILLMClient {
         }
 
         // Read response from temp file
-        let content: string;
-        try {
-          content = fs.readFileSync(tmpFile, "utf-8").trim();
-        } catch (readErr) {
-          _cleanupTmp(tmpDir, tmpFile);
-          reject(
-            new Error(
-              `CodexLLMClient: failed to read output file — ${String(readErr)}`
-            )
-          );
-          return;
-        }
-
-        _cleanupTmp(tmpDir, tmpFile);
-        resolve(content);
+        fsp.readFile(tmpFile, "utf-8")
+          .then((raw) => {
+            _cleanupTmp(tmpDir, tmpFile).catch(() => {});
+            resolve(raw.trim());
+          })
+          .catch((readErr) => {
+            _cleanupTmp(tmpDir, tmpFile).catch(() => {});
+            reject(
+              new Error(
+                `CodexLLMClient: failed to read output file — ${String(readErr)}`
+              )
+            );
+          });
       });
     });
   }
@@ -240,12 +239,15 @@ export class CodexLLMClient implements ILLMClient {
 
 // ─── Helpers ───
 
-function _cleanupTmp(tmpDir: string, tmpFile: string): void {
+async function _cleanupTmp(tmpDir: string, tmpFile: string): Promise<void> {
   try {
-    if (fs.existsSync(tmpFile)) {
-      fs.unlinkSync(tmpFile);
-    }
-    fs.rmdirSync(tmpDir);
+    await fsp.access(tmpFile);
+    await fsp.unlink(tmpFile);
+  } catch {
+    // file may not exist — ignore
+  }
+  try {
+    await fsp.rmdir(tmpDir);
   } catch {
     // best-effort cleanup
   }

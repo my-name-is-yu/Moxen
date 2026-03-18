@@ -461,7 +461,7 @@ export class CLIRunner {
       }
 
       if (pluginSubcommand === "remove") {
-        return cmdPluginRemove(undefined, argv.slice(2));
+        return await cmdPluginRemove(undefined, argv.slice(2));
       }
 
       logger.error(`Unknown plugin subcommand: "${pluginSubcommand}"`);

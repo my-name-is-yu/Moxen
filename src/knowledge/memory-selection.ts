@@ -79,15 +79,15 @@ export function relevanceScore(
  * Phase 2 (5.2b): semantic search fallback via VectorIndex if tag results are insufficient.
  * Phase 2 (5.2c): includes cross-goal lessons (up to 25% of budget).
  */
-export function selectForWorkingMemory(
+export async function selectForWorkingMemory(
   deps: MemorySelectionDeps,
   goalId: string,
   dimensions: string[],
   tags: string[],
   maxEntries: number = 10
-): { shortTerm: ShortTermEntry[]; lessons: LessonEntry[] } {
+): Promise<{ shortTerm: ShortTermEntry[]; lessons: LessonEntry[] }> {
   // 1. Tag-based query: short-term entries for this goal matching dimensions/tags
-  const stIndex = loadIndex(deps.memoryDir, "short-term");
+  const stIndex = await loadIndex(deps.memoryDir, "short-term");
   const matchingIndexEntries = stIndex.entries.filter(
     (ie) =>
       ie.goal_id === goalId &&
@@ -126,13 +126,13 @@ export function selectForWorkingMemory(
       seenEntryIds.add(idxEntry.entry_id);
 
       // Update access metadata in index
-      touchIndexEntry(deps.memoryDir, "short-term", idxEntry.id);
+      void touchIndexEntry(deps.memoryDir, "short-term", idxEntry.id);
     }
   }
 
   // Phase 2 (5.2b): If results are fewer than needed and VectorIndex available, do sync lookup
-  // Note: selectForWorkingMemory is sync — semantic search via vectorIndex happens in
-  // selectForWorkingMemorySemantic (async). Here we merge from the index directly.
+  // Note: selectForWorkingMemorySemantic (async) handles full semantic search.
+  // Here we merge from the index directly.
   if (shortTermEntries.length < maxEntries && deps.vectorIndex) {
     // Pull all goal entries from the short-term index (not yet in result set) as semantic candidates
     const remaining = stIndex.entries.filter(
@@ -326,7 +326,7 @@ export async function selectForWorkingMemorySemantic(
   );
 
   // Load short-term index for recency data
-  const stIndex = loadIndex(deps.memoryDir, "short-term");
+  const stIndex = await loadIndex(deps.memoryDir, "short-term");
   const indexEntryMap = new Map(
     stIndex.entries.map((ie) => [ie.entry_id, ie])
   );

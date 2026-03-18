@@ -1,5 +1,5 @@
 import * as crypto from "node:crypto";
-import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { StateManager } from "./state-manager.js";
 import { ReportSchema } from "./types/report.js";
@@ -152,12 +152,12 @@ export class ReportingEngine {
 
   // ─── generateDailySummary ───
 
-  generateDailySummary(goalId: string): Report {
+  async generateDailySummary(goalId: string): Promise<Report> {
     const now = new Date();
     const todayPrefix = now.toISOString().slice(0, 10); // "YYYY-MM-DD"
 
     // Load all reports for this goal
-    const allReports = this.listReports(goalId);
+    const allReports = await this.listReports(goalId);
 
     // Filter to execution summaries generated today
     const todayReports = allReports.filter((r) => {
@@ -233,12 +233,12 @@ export class ReportingEngine {
 
   // ─── generateWeeklyReport ───
 
-  generateWeeklyReport(goalId: string): Report {
+  async generateWeeklyReport(goalId: string): Promise<Report> {
     const now = new Date();
     const reportNow = now.toISOString();
 
     // Collect daily summaries for the last 7 days
-    const allReports = this.listReports(goalId);
+    const allReports = await this.listReports(goalId);
 
     const dailySummaries = allReports.filter((r) => {
       if (r.report_type !== "daily_summary") return false;
@@ -326,29 +326,32 @@ export class ReportingEngine {
 
   // ─── getReport ───
 
-  getReport(reportId: string): Report | null {
-    const allReports = this.listReports();
+  async getReport(reportId: string): Promise<Report | null> {
+    const allReports = await this.listReports();
     const found = allReports.find((r) => r.id === reportId);
     return found ?? null;
   }
 
   // ─── listReports ───
 
-  listReports(goalId?: string): Report[] {
+  async listReports(goalId?: string): Promise<Report[]> {
     const results: Report[] = [];
     const baseDir = this.stateManager.getBaseDir();
     const reportsDir = `${baseDir}/reports`;
 
-    if (!fs.existsSync(reportsDir)) return [];
-
     if (goalId !== undefined) {
-      this._loadReportsFromAbsDir(`${reportsDir}/${goalId}`, results);
+      await this._loadReportsFromAbsDir(`${reportsDir}/${goalId}`, results);
     } else {
       // Scan all subdirectories under reports/
-      const entries = fs.readdirSync(reportsDir, { withFileTypes: true });
+      let entries: import("node:fs").Dirent<string>[];
+      try {
+        entries = await fsp.readdir(reportsDir, { withFileTypes: true });
+      } catch {
+        return [];
+      }
       for (const entry of entries) {
         if (entry.isDirectory()) {
-          this._loadReportsFromAbsDir(`${reportsDir}/${entry.name}`, results);
+          await this._loadReportsFromAbsDir(`${reportsDir}/${entry.name}`, results);
         }
       }
     }
@@ -358,9 +361,13 @@ export class ReportingEngine {
     return results;
   }
 
-  private _loadReportsFromAbsDir(absDir: string, results: Report[]): void {
-    if (!fs.existsSync(absDir)) return;
-    const entries = fs.readdirSync(absDir);
+  private async _loadReportsFromAbsDir(absDir: string, results: Report[]): Promise<void> {
+    let entries: string[];
+    try {
+      entries = await fsp.readdir(absDir);
+    } catch {
+      return;
+    }
     for (const entry of entries) {
       if (!entry.endsWith(".json")) continue;
       // Use readRaw relative path

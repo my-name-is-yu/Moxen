@@ -135,7 +135,7 @@ export class ActionHandler {
     return { messages };
   }
 
-  private handleReport(): ActionResult {
+  private async handleReport(): Promise<ActionResult> {
     const ids = this.deps.stateManager.listGoalIds();
 
     if (ids.length === 0) {
@@ -146,7 +146,7 @@ export class ActionHandler {
 
     for (const id of ids) {
       try {
-        const report = this.deps.reportingEngine.generateDailySummary(id);
+        const report = await this.deps.reportingEngine.generateDailySummary(id);
         this.deps.reportingEngine.saveReport(report);
         const sections = report.content.split(/\n(?=## )/).filter(s => s.trim());
         for (const section of sections) {

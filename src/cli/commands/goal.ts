@@ -1,10 +1,10 @@
 // ─── motiva goal subcommands ───
 
-import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import * as readline from "node:readline";
 import { getArchiveDir, getReportsDir } from "../../utils/paths.js";
-import { readJsonFileSync } from "../../utils/json-io.js";
+import { readJsonFile } from "../../utils/json-io.js";
 
 import { StateManager } from "../../state-manager.js";
 import { CharacterConfigManager } from "../../traits/character-config.js";
@@ -38,7 +38,7 @@ export async function cmdGoalAdd(
   opts: { deadline?: string; constraints?: string[]; yes?: boolean }
 ): Promise<number> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  const providerConfig = loadProviderConfig();
+  const providerConfig = await loadProviderConfig();
   const provider = providerConfig.llm_provider;
   if (!apiKey && provider !== "ollama" && provider !== "openai" && provider !== "codex") {
     getCliLogger().error(
@@ -51,9 +51,9 @@ export async function cmdGoalAdd(
     return 1;
   }
 
-  let deps: ReturnType<typeof buildDeps>;
+  let deps: Awaited<ReturnType<typeof buildDeps>>;
   try {
-    deps = buildDeps(stateManager, characterConfigManager, apiKey);
+    deps = await buildDeps(stateManager, characterConfigManager, apiKey);
   } catch (err) {
     getCliLogger().error(formatOperationError("initialise goal negotiation dependencies", err));
     return 1;
@@ -110,8 +110,8 @@ export async function cmdGoalAdd(
       }
     }
 
-    autoRegisterFileExistenceDataSources(stateManager, goal.dimensions, goal.description, goal.id);
-    autoRegisterShellDataSources(stateManager, goal.dimensions, goal.id);
+    await autoRegisterFileExistenceDataSources(stateManager, goal.dimensions, goal.description, goal.id);
+    await autoRegisterShellDataSources(stateManager, goal.dimensions, goal.id);
 
     console.log(`Goal registered successfully!`);
     console.log(`Goal ID:    ${goal.id}`);
@@ -140,31 +140,30 @@ export async function cmdGoalAdd(
   }
 }
 
-export function cmdGoalList(
+export async function cmdGoalList(
   stateManager: StateManager,
   opts: { archived?: boolean } = {}
-): number {
+): Promise<number> {
   const goalsDir = path.join(stateManager.getBaseDir(), "goals");
 
-  if (!fs.existsSync(goalsDir) || fs.readdirSync(goalsDir).length === 0) {
+  let goalsDirEntries: string[] = [];
+  try {
+    await fsp.access(goalsDir);
+    goalsDirEntries = await fsp.readdir(goalsDir);
+  } catch { /* dir doesn't exist or unreadable */ }
+
+  if (goalsDirEntries.length === 0) {
     console.log("No goals registered. Use `motiva goal add` to create one.");
   } else {
-    let entries: string[];
-    try {
-      entries = fs.readdirSync(goalsDir);
-    } catch (err) {
-      getCliLogger().error(formatOperationError("read goals directory", err));
-      return 1;
-    }
-
-    const goalDirs = entries.filter((e) => {
+    const goalDirs: string[] = [];
+    for (const e of goalsDirEntries) {
       try {
-        return fs.statSync(path.join(goalsDir, e)).isDirectory();
+        const stat = await fsp.stat(path.join(goalsDir, e));
+        if (stat.isDirectory()) goalDirs.push(e);
       } catch (err) {
         getCliLogger().error(formatOperationError(`inspect goal directory entry "${e}"`, err));
-        return false;
       }
-    });
+    }
 
     if (goalDirs.length === 0) {
       console.log("No goals registered. Use `motiva goal add` to create one.");
@@ -197,16 +196,15 @@ export function cmdGoalList(
       let status = "unknown";
       let dimCount = 0;
       try {
-        if (fs.existsSync(archivedGoalPath)) {
-          const raw = readJsonFileSync<{
-            title?: string;
-            status?: string;
-            dimensions?: unknown[];
-          }>(archivedGoalPath);
-          title = raw.title ?? title;
-          status = raw.status ?? status;
-          dimCount = raw.dimensions?.length ?? 0;
-        }
+        await fsp.access(archivedGoalPath);
+        const raw = await readJsonFile<{
+          title?: string;
+          status?: string;
+          dimensions?: unknown[];
+        }>(archivedGoalPath);
+        title = raw.title ?? title;
+        status = raw.status ?? status;
+        dimCount = raw.dimensions?.length ?? 0;
       } catch (err) {
         getCliLogger().error(formatOperationError(`read archived goal metadata for "${goalId}"`, err));
       }
@@ -219,7 +217,7 @@ export function cmdGoalList(
   return 0;
 }
 
-export function cmdStatus(stateManager: StateManager, goalId: string): number {
+export async function cmdStatus(stateManager: StateManager, goalId: string): Promise<number> {
   const reportingEngine = new ReportingEngine(stateManager);
 
   const goal = stateManager.loadGoal(goalId);
@@ -248,7 +246,7 @@ export function cmdStatus(stateManager: StateManager, goalId: string): number {
     console.log(`  Target: ${JSON.stringify(dim.threshold)}`);
   }
 
-  const reports = reportingEngine.listReports(goalId);
+  const reports = await reportingEngine.listReports(goalId);
   const execReports = reports
     .filter((r) => r.report_type === "execution_summary")
     .sort((a, b) => (a.generated_at < b.generated_at ? 1 : -1));
@@ -409,7 +407,7 @@ export async function cmdGoalArchive(
   return 0;
 }
 
-export function cmdCleanup(stateManager: StateManager): number {
+export async function cmdCleanup(stateManager: StateManager): Promise<number> {
   const goalIds = stateManager.listGoalIds();
 
   const completed: string[] = [];
@@ -434,12 +432,15 @@ export function cmdCleanup(stateManager: StateManager): number {
   const staleReports: string[] = [];
 
   const reportsDir = getReportsDir(baseDir);
-  if (fs.existsSync(reportsDir)) {
+  let reportsDirExists = false;
+  try { await fsp.access(reportsDir); reportsDirExists = true; } catch { /* not found */ }
+
+  if (reportsDirExists) {
     try {
-      const reportFiles = fs.readdirSync(reportsDir).filter((f) => f.endsWith(".json"));
+      const reportFiles = (await fsp.readdir(reportsDir)).filter((f) => f.endsWith(".json"));
       for (const file of reportFiles) {
         try {
-          const raw = readJsonFileSync<{ goal_id?: string }>(path.join(reportsDir, file));
+          const raw = await readJsonFile<{ goal_id?: string }>(path.join(reportsDir, file));
           if (raw.goal_id && !activeGoalIds.has(raw.goal_id)) {
             staleReports.push(file);
           }

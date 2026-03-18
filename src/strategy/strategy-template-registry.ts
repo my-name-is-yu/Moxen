@@ -1,4 +1,4 @@
-import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { z } from "zod";
 import type { ILLMClient } from "../llm/llm-client.js";
@@ -377,7 +377,7 @@ export class StrategyTemplateRegistry {
    */
   async save(): Promise<void> {
     const dir = path.dirname(this.persistPath);
-    fs.mkdirSync(dir, { recursive: true });
+    await fsp.mkdir(dir, { recursive: true });
 
     const data = JSON.stringify(
       Array.from(this.templates.values()),
@@ -385,8 +385,8 @@ export class StrategyTemplateRegistry {
       2
     );
     const tmpPath = `${this.persistPath}.tmp`;
-    fs.writeFileSync(tmpPath, data, "utf-8");
-    fs.renameSync(tmpPath, this.persistPath);
+    await fsp.writeFile(tmpPath, data, "utf-8");
+    await fsp.rename(tmpPath, this.persistPath);
   }
 
   /**
@@ -394,10 +394,10 @@ export class StrategyTemplateRegistry {
    * Silently succeeds if the file does not exist.
    */
   async load(): Promise<void> {
-    if (!fs.existsSync(this.persistPath)) return;
+    try { await fsp.access(this.persistPath); } catch { return; }
 
     try {
-      const raw = fs.readFileSync(this.persistPath, "utf-8");
+      const raw = await fsp.readFile(this.persistPath, "utf-8");
       const parsed = JSON.parse(raw) as unknown[];
       this.templates.clear();
       for (const item of parsed) {

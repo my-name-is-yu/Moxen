@@ -28,8 +28,8 @@ import { GitHubIssueAdapter } from "../adapters/github-issue.js";
  *   - "ollama"    → OllamaLLMClient (OLLAMA_BASE_URL, OLLAMA_MODEL)
  *   - "codex"     → CodexLLMClient (codex CLI required, OPENAI_MODEL optional)
  */
-export function buildLLMClient(): ILLMClient {
-  const config = loadProviderConfig();
+export async function buildLLMClient(): Promise<ILLMClient> {
+  const config = await loadProviderConfig();
 
   switch (config.llm_provider) {
     case "codex":

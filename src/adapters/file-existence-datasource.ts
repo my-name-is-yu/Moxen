@@ -11,7 +11,7 @@
 //   connection.path       — base directory to resolve filenames against (defaults to cwd)
 //   dimension_mapping     — map of dimension_name → filename (relative to baseDir)
 
-import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import type { IDataSourceAdapter } from "../observation/data-source-adapter.js";
 import type {
@@ -71,7 +71,8 @@ export class FileExistenceDataSourceAdapter implements IDataSourceAdapter {
     }
 
     const fullPath = path.join(this.baseDir, filename);
-    const exists = fs.existsSync(fullPath);
+    let exists = true;
+    try { await fsp.access(fullPath); } catch { exists = false; }
 
     // For "present" threshold: 1 = exists, 0 = missing
     return {

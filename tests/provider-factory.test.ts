@@ -58,138 +58,138 @@ describe("buildLLMClient — early API key validation", () => {
   // ── anthropic ──────────────────────────────────────────────────────────────
 
   describe("provider: anthropic", () => {
-    it("throws when ANTHROPIC_API_KEY is absent", () => {
-      mockLoadProviderConfig.mockReturnValue({
+    it("throws when ANTHROPIC_API_KEY is absent", async () => {
+      mockLoadProviderConfig.mockResolvedValue({
         llm_provider: "anthropic",
         default_adapter: "claude_api",
         // anthropic section absent → no api_key
       });
 
-      expect(() => buildLLMClient()).toThrowError(/ANTHROPIC_API_KEY is not set/);
+      await expect(buildLLMClient()).rejects.toThrow(/ANTHROPIC_API_KEY is not set/);
     });
 
-    it("throws with setup instructions mentioning export", () => {
-      mockLoadProviderConfig.mockReturnValue({
+    it("throws with setup instructions mentioning export", async () => {
+      mockLoadProviderConfig.mockResolvedValue({
         llm_provider: "anthropic",
         default_adapter: "claude_api",
       });
 
-      expect(() => buildLLMClient()).toThrowError(/export ANTHROPIC_API_KEY/);
+      await expect(buildLLMClient()).rejects.toThrow(/export ANTHROPIC_API_KEY/);
     });
 
-    it("succeeds when ANTHROPIC_API_KEY is present", () => {
-      mockLoadProviderConfig.mockReturnValue({
+    it("succeeds when ANTHROPIC_API_KEY is present", async () => {
+      mockLoadProviderConfig.mockResolvedValue({
         llm_provider: "anthropic",
         default_adapter: "claude_api",
         anthropic: { api_key: "sk-ant-test" },
       });
 
-      expect(() => buildLLMClient()).not.toThrow();
+      await expect(buildLLMClient()).resolves.not.toThrow();
     });
   });
 
   // ── openai ─────────────────────────────────────────────────────────────────
 
   describe("provider: openai", () => {
-    it("throws when OPENAI_API_KEY is absent", () => {
-      mockLoadProviderConfig.mockReturnValue({
+    it("throws when OPENAI_API_KEY is absent", async () => {
+      mockLoadProviderConfig.mockResolvedValue({
         llm_provider: "openai",
         default_adapter: "openai_api",
         // openai section absent → no api_key
       });
 
-      expect(() => buildLLMClient()).toThrowError(/OPENAI_API_KEY is not set/);
+      await expect(buildLLMClient()).rejects.toThrow(/OPENAI_API_KEY is not set/);
     });
 
-    it("throws with setup instructions mentioning export", () => {
-      mockLoadProviderConfig.mockReturnValue({
+    it("throws with setup instructions mentioning export", async () => {
+      mockLoadProviderConfig.mockResolvedValue({
         llm_provider: "openai",
         default_adapter: "openai_api",
       });
 
-      expect(() => buildLLMClient()).toThrowError(/export OPENAI_API_KEY/);
+      await expect(buildLLMClient()).rejects.toThrow(/export OPENAI_API_KEY/);
     });
 
-    it("succeeds when OPENAI_API_KEY is present", () => {
-      mockLoadProviderConfig.mockReturnValue({
+    it("succeeds when OPENAI_API_KEY is present", async () => {
+      mockLoadProviderConfig.mockResolvedValue({
         llm_provider: "openai",
         default_adapter: "openai_api",
         openai: { api_key: "sk-test" },
       });
 
-      expect(() => buildLLMClient()).not.toThrow();
+      await expect(buildLLMClient()).resolves.not.toThrow();
     });
   });
 
   // ── codex ──────────────────────────────────────────────────────────────────
 
   describe("provider: codex", () => {
-    it("throws when OPENAI_API_KEY is absent", () => {
-      mockLoadProviderConfig.mockReturnValue({
+    it("throws when OPENAI_API_KEY is absent", async () => {
+      mockLoadProviderConfig.mockResolvedValue({
         llm_provider: "codex",
         default_adapter: "openai_codex_cli",
         // openai section absent → no api_key
       });
 
-      expect(() => buildLLMClient()).toThrowError(/OPENAI_API_KEY is not set/);
+      await expect(buildLLMClient()).rejects.toThrow(/OPENAI_API_KEY is not set/);
     });
 
-    it("throws with setup instructions mentioning export", () => {
-      mockLoadProviderConfig.mockReturnValue({
+    it("throws with setup instructions mentioning export", async () => {
+      mockLoadProviderConfig.mockResolvedValue({
         llm_provider: "codex",
         default_adapter: "openai_codex_cli",
       });
 
-      expect(() => buildLLMClient()).toThrowError(/export OPENAI_API_KEY/);
+      await expect(buildLLMClient()).rejects.toThrow(/export OPENAI_API_KEY/);
     });
 
-    it("succeeds when OPENAI_API_KEY is present", () => {
-      mockLoadProviderConfig.mockReturnValue({
+    it("succeeds when OPENAI_API_KEY is present", async () => {
+      mockLoadProviderConfig.mockResolvedValue({
         llm_provider: "codex",
         default_adapter: "openai_codex_cli",
         openai: { api_key: "sk-test" },
       });
 
-      expect(() => buildLLMClient()).not.toThrow();
+      await expect(buildLLMClient()).resolves.not.toThrow();
     });
   });
 
   // ── ollama ─────────────────────────────────────────────────────────────────
 
   describe("provider: ollama", () => {
-    it("succeeds without any API key (ollama needs no key)", () => {
-      mockLoadProviderConfig.mockReturnValue({
+    it("succeeds without any API key (ollama needs no key)", async () => {
+      mockLoadProviderConfig.mockResolvedValue({
         llm_provider: "ollama",
         default_adapter: "claude_api",
         // no anthropic or openai section
       });
 
-      expect(() => buildLLMClient()).not.toThrow();
+      await expect(buildLLMClient()).resolves.not.toThrow();
     });
   });
 
   // ── default fallback (unknown provider → OpenAI) ───────────────────────────
 
   describe("provider: default fallback", () => {
-    it("throws when OPENAI_API_KEY is absent in default fallback path", () => {
-      mockLoadProviderConfig.mockReturnValue({
+    it("throws when OPENAI_API_KEY is absent in default fallback path", async () => {
+      mockLoadProviderConfig.mockResolvedValue({
         // @ts-expect-error intentionally unknown provider to exercise default branch
         llm_provider: "unknown-provider",
         default_adapter: "openai_api",
       });
 
-      expect(() => buildLLMClient()).toThrowError(/OPENAI_API_KEY is not set/);
+      await expect(buildLLMClient()).rejects.toThrow(/OPENAI_API_KEY is not set/);
     });
 
-    it("succeeds when OPENAI_API_KEY is present in default fallback path", () => {
-      mockLoadProviderConfig.mockReturnValue({
+    it("succeeds when OPENAI_API_KEY is present in default fallback path", async () => {
+      mockLoadProviderConfig.mockResolvedValue({
         // @ts-expect-error intentionally unknown provider to exercise default branch
         llm_provider: "unknown-provider",
         default_adapter: "openai_api",
         openai: { api_key: "sk-test" },
       });
 
-      expect(() => buildLLMClient()).not.toThrow();
+      await expect(buildLLMClient()).resolves.not.toThrow();
     });
   });
 });

@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { type KnowledgeEdge, KnowledgeEdgeSchema } from "../types/knowledge.js";
 
@@ -25,7 +26,7 @@ export class KnowledgeGraph {
   private edges: KnowledgeEdge[] = [];
 
   constructor(private readonly graphPath: string) {
-    this.load();
+    this._loadSync();
   }
 
   // ─── Node CRUD ───
@@ -34,7 +35,7 @@ export class KnowledgeGraph {
    * Add a node for a KnowledgeEntry. If a node with the same entry_id already
    * exists, it is replaced (update semantics).
    */
-  addNode(entryId: string, goalId: string, tags: string[]): void {
+  async addNode(entryId: string, goalId: string, tags: string[]): Promise<void> {
     const node: KnowledgeGraphNode = {
       entry_id: entryId,
       goal_id: goalId,
@@ -42,19 +43,19 @@ export class KnowledgeGraph {
       added_at: new Date().toISOString(),
     };
     this.nodes.set(entryId, node);
-    this.save();
+    await this.save();
   }
 
   /**
    * Remove a node and all edges that reference it.
    */
-  removeNode(entryId: string): void {
+  async removeNode(entryId: string): Promise<void> {
     if (!this.nodes.has(entryId)) return;
     this.nodes.delete(entryId);
     this.edges = this.edges.filter(
       (e) => e.from_id !== entryId && e.to_id !== entryId
     );
-    this.save();
+    await this.save();
   }
 
   getNode(entryId: string): KnowledgeGraphNode | undefined {
@@ -71,7 +72,7 @@ export class KnowledgeGraph {
    * Add an edge. created_at is set automatically to the current timestamp.
    * Duplicate edges (same from_id, to_id, relation) are replaced.
    */
-  addEdge(edge: Omit<KnowledgeEdge, "created_at">): void {
+  async addEdge(edge: Omit<KnowledgeEdge, "created_at">): Promise<void> {
     // Remove existing edge with same from/to/relation to avoid duplicates
     this.edges = this.edges.filter(
       (e) =>
@@ -86,19 +87,19 @@ export class KnowledgeGraph {
       created_at: new Date().toISOString(),
     });
     this.edges.push(full);
-    this.save();
+    await this.save();
   }
 
   /**
    * Remove all edges between fromId and toId (regardless of relation type).
    */
-  removeEdge(fromId: string, toId: string): void {
+  async removeEdge(fromId: string, toId: string): Promise<void> {
     const before = this.edges.length;
     this.edges = this.edges.filter(
       (e) => !(e.from_id === fromId && e.to_id === toId)
     );
     if (this.edges.length !== before) {
-      this.save();
+      await this.save();
     }
   }
 
@@ -197,9 +198,9 @@ export class KnowledgeGraph {
 
   // ─── Persistence ───
 
-  private save(): void {
+  private async save(): Promise<void> {
     const dir = path.dirname(this.graphPath);
-    fs.mkdirSync(dir, { recursive: true });
+    await fsp.mkdir(dir, { recursive: true });
 
     const data: GraphData = {
       nodes: Array.from(this.nodes.values()),
@@ -208,11 +209,11 @@ export class KnowledgeGraph {
 
     const json = JSON.stringify(data, null, 2);
     const tmpPath = `${this.graphPath}.tmp`;
-    fs.writeFileSync(tmpPath, json, "utf-8");
-    fs.renameSync(tmpPath, this.graphPath);
+    await fsp.writeFile(tmpPath, json, "utf-8");
+    await fsp.rename(tmpPath, this.graphPath);
   }
 
-  private load(): void {
+  private _loadSync(): void {
     if (!fs.existsSync(this.graphPath)) return;
     try {
       const raw = fs.readFileSync(this.graphPath, "utf-8");
@@ -237,9 +238,9 @@ export class KnowledgeGraph {
   /**
    * Remove all nodes and edges and persist the empty state.
    */
-  clear(): void {
+  async clear(): Promise<void> {
     this.nodes.clear();
     this.edges = [];
-    this.save();
+    await this.save();
   }
 }

@@ -33,9 +33,9 @@ import type { Task } from "../types/task.js";
 
 // ─── Dependency Wiring ───
 
-function buildDeps() {
+async function buildDeps() {
   const stateManager = new StateManager();
-  const llmClient = buildLLMClient();
+  const llmClient = await buildLLMClient();
   const trustManager = new TrustManager(stateManager);
   const driveSystem = new DriveSystem(stateManager);
   const observationEngine = new ObservationEngine(stateManager);
@@ -133,9 +133,9 @@ export async function startTUI(): Promise<void> {
   }
 
   // 2. Wire all dependencies
-  let deps: ReturnType<typeof buildDeps>;
+  let deps: Awaited<ReturnType<typeof buildDeps>>;
   try {
-    deps = buildDeps();
+    deps = await buildDeps();
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     getCliLogger().error(`Error: Failed to initialise dependencies: ${message}`);

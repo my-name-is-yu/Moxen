@@ -1,4 +1,4 @@
-import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { z } from "zod";
 import type { ILLMClient } from "../llm/llm-client.js";
@@ -17,11 +17,11 @@ import type {
 } from "../types/memory-lifecycle.js";
 import type { IDriveScorer } from "./drive-score-adapter.js";
 import {
-  atomicWrite,
-  readJsonFile,
+  atomicWriteAsync,
+  readJsonFileAsync,
   getDataFile,
   generateId,
-  getDirectorySize,
+  getDirectorySizeAsync,
   getRetentionLimit,
 } from "./memory-persistence.js";
 import {
@@ -91,10 +91,10 @@ export async function compressToLongTerm(
   const now = new Date().toISOString();
   const dataFile = getDataFile(deps.memoryDir, goalId, dataType);
   const allEntries =
-    readJsonFile<ShortTermEntry[]>(
+    (await readJsonFileAsync<ShortTermEntry[]>(
       dataFile,
       z.array(ShortTermEntrySchema)
-    ) ?? [];
+    )) ?? [];
 
   // Determine the retention limit for this goal
   const retentionLimit = getRetentionLimit(deps.config, goalId);
@@ -178,7 +178,7 @@ export async function compressToLongTerm(
     }
 
     // Step 4: Store lessons in long-term (by-goal, by-dimension, global)
-    storeLessonsLongTerm(deps.memoryDir, goalId, lessons, expiredEntries);
+    await storeLessonsLongTerm(deps.memoryDir, goalId, lessons, expiredEntries);
 
     // Phase 2 (5.2c): Auto-register lesson entries in VectorIndex
     if (deps.vectorIndex) {
@@ -202,10 +202,10 @@ export async function compressToLongTerm(
     // Step 6: Purge compressed short-term entries (only if compression succeeded)
     const compressedIds = new Set(expiredEntries.map((e) => e.id));
     const remaining = allEntries.filter((e) => !compressedIds.has(e.id));
-    atomicWrite(dataFile, remaining);
+    await atomicWriteAsync(dataFile, remaining);
 
     // Remove purged entries from the short-term index
-    removeFromIndex(deps.memoryDir, "short-term", compressedIds);
+    await removeFromIndex(deps.memoryDir, "short-term", compressedIds);
   } catch {
     // LLM failure — never delete short-term data
     return {
@@ -268,7 +268,7 @@ export async function compressAllRemainingToLongTerm(
     })
   );
 
-  storeLessonsLongTerm(deps.memoryDir, goalId, lessons, entries);
+  await storeLessonsLongTerm(deps.memoryDir, goalId, lessons, entries);
   updateStatistics(deps.memoryDir, goalId, entries);
 
   void dataType; // type info available for future audit logging
@@ -296,13 +296,13 @@ export async function applyRetentionPolicy(
 
   for (const dataType of dataTypes) {
     const dataFile = getDataFile(deps.memoryDir, goalId, dataType);
-    if (!fs.existsSync(dataFile)) continue;
+    try { await fsp.access(dataFile); } catch { continue; }
 
     const entries =
-      readJsonFile<ShortTermEntry[]>(
+      (await readJsonFileAsync<ShortTermEntry[]>(
         dataFile,
         z.array(ShortTermEntrySchema)
-      ) ?? [];
+      )) ?? [];
 
     if (entries.length === 0) continue;
 
@@ -359,10 +359,9 @@ export async function runGarbageCollection(
     "goals"
   );
 
-  if (!fs.existsSync(shortTermGoalsDir)) return;
+  try { await fsp.access(shortTermGoalsDir); } catch { return; }
 
-  const goalDirs = fs
-    .readdirSync(shortTermGoalsDir, { withFileTypes: true })
+  const goalDirs = (await fsp.readdir(shortTermGoalsDir, { withFileTypes: true }))
     .filter((d) => d.isDirectory())
     .map((d) => d.name);
 
@@ -372,7 +371,7 @@ export async function runGarbageCollection(
   // Check short-term size per goal
   for (const goalId of goalDirs) {
     const goalDir = path.join(shortTermGoalsDir, goalId);
-    const size = getDirectorySize(goalDir);
+    const size = await getDirectorySizeAsync(goalDir);
 
     if (size > shortTermLimitBytes) {
       // Trigger early compression for all data types
@@ -395,15 +394,18 @@ export async function runGarbageCollection(
 
   // Check long-term total size
   const longTermDir = path.join(deps.memoryDir, "long-term");
-  if (fs.existsSync(longTermDir)) {
-    const longTermSize = getDirectorySize(longTermDir);
+  try {
+    await fsp.access(longTermDir);
+    const longTermSize = await getDirectorySizeAsync(longTermDir);
     const longTermLimitBytes =
       deps.config.size_limits.long_term_total_mb * 1024 * 1024;
 
     if (longTermSize > longTermLimitBytes) {
       // Archive oldest (by last_accessed) lessons from long-term index
-      archiveOldestLongTermEntries(deps.memoryDir);
+      await archiveOldestLongTermEntries(deps.memoryDir);
     }
+  } catch {
+    // longTermDir doesn't exist, nothing to do
   }
 }
 

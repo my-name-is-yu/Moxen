@@ -41,7 +41,7 @@ export async function cmdRun(
   activeCoreLoopRef?: { value: import("../../core-loop.js").CoreLoop | null }
 ): Promise<number> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
-  const providerConfig = loadProviderConfig();
+  const providerConfig = await loadProviderConfig();
   const provider = providerConfig.llm_provider;
   if (!apiKey && provider !== "ollama" && provider !== "openai" && provider !== "codex") {
     getCliLogger().error(
@@ -104,9 +104,9 @@ export async function cmdRun(
   };
   void maxIterations;
 
-  let deps: ReturnType<typeof buildDeps>;
+  let deps: Awaited<ReturnType<typeof buildDeps>>;
   try {
-    deps = buildDeps(stateManager, characterConfigManager, apiKey, loopConfig, approvalFn, logger, onProgress);
+    deps = await buildDeps(stateManager, characterConfigManager, apiKey, loopConfig, approvalFn, logger, onProgress);
   } catch (err) {
     rl?.close();
     logger.error(formatOperationError("initialise dependencies", err));

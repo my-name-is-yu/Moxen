@@ -59,7 +59,7 @@ describe.skipIf(!API_KEY_SET)("OpenAI E2E — real API calls", () => {
       process.env["MOTIVA_LLM_PROVIDER"] = "openai";
 
       try {
-        const client = buildLLMClient();
+        const client = await buildLLMClient();
         expect(client).toBeInstanceOf(OpenAILLMClient);
 
         // Verify it is usable — make a minimal call

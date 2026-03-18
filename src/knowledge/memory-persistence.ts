@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { z } from "zod";
 import type { MemoryDataType, RetentionConfig } from "../types/memory-lifecycle.js";
@@ -63,6 +64,64 @@ export function getDataFile(memoryDir: string, goalId: string, dataType: MemoryD
  */
 export function generateId(prefix: string): string {
   return `${prefix}_${randomUUID().replace(/-/g, "").slice(0, 12)}`;
+}
+
+// ─── Async versions of file utilities ───
+
+/**
+ * Write data to a file atomically (async version).
+ */
+export async function atomicWriteAsync(filePath: string, data: unknown): Promise<void> {
+  const dir = path.dirname(filePath);
+  await fsp.mkdir(dir, { recursive: true });
+  const tmpPath = filePath + ".tmp";
+  await fsp.writeFile(tmpPath, JSON.stringify(data, null, 2), "utf-8");
+  await fsp.rename(tmpPath, filePath);
+}
+
+/**
+ * Read and parse a JSON file using the provided Zod schema (async version).
+ * Returns null if the file doesn't exist or parsing fails.
+ */
+export async function readJsonFileAsync<T>(filePath: string, schema: z.ZodTypeAny): Promise<T | null> {
+  try {
+    await fsp.access(filePath);
+  } catch {
+    return null;
+  }
+  try {
+    const content = await fsp.readFile(filePath, "utf-8");
+    const raw = JSON.parse(content) as unknown;
+    return schema.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Compute total size of a directory recursively in bytes (async version).
+ */
+export async function getDirectorySizeAsync(dirPath: string): Promise<number> {
+  try {
+    await fsp.access(dirPath);
+  } catch {
+    return 0;
+  }
+  let total = 0;
+  const entries = await fsp.readdir(dirPath, { withFileTypes: true });
+  for (const entry of entries) {
+    const entryPath = path.join(dirPath, entry.name);
+    if (entry.isDirectory()) {
+      total += await getDirectorySizeAsync(entryPath);
+    } else {
+      try {
+        total += (await fsp.stat(entryPath)).size;
+      } catch {
+        // Ignore stat errors
+      }
+    }
+  }
+  return total;
 }
 
 // ─── Directory size ───

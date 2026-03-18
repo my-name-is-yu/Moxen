@@ -40,9 +40,9 @@ describe("autoRegisterShellDataSources", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("creates a shell datasource config for todo_count dimension", () => {
+  it("creates a shell datasource config for todo_count dimension", async () => {
     const sm = makeFakeStateManager(tmpDir);
-    autoRegisterShellDataSources(
+    await autoRegisterShellDataSources(
       sm as never,
       [{ name: "todo_count" }],
       "goal_abc"
@@ -60,9 +60,9 @@ describe("autoRegisterShellDataSources", () => {
     expect(commands.todo_count.output_type).toBe("number");
   });
 
-  it("creates a shell datasource config for fixme_count dimension", () => {
+  it("creates a shell datasource config for fixme_count dimension", async () => {
     const sm = makeFakeStateManager(tmpDir);
-    autoRegisterShellDataSources(
+    await autoRegisterShellDataSources(
       sm as never,
       [{ name: "fixme_count" }],
       "goal_xyz"
@@ -76,9 +76,9 @@ describe("autoRegisterShellDataSources", () => {
     expect(commands.fixme_count.output_type).toBe("number");
   });
 
-  it("skips dimensions with no matching pattern", () => {
+  it("skips dimensions with no matching pattern", async () => {
     const sm = makeFakeStateManager(tmpDir);
-    autoRegisterShellDataSources(
+    await autoRegisterShellDataSources(
       sm as never,
       [{ name: "readme_quality" }, { name: "some_unknown_metric" }],
       "goal_skip"
@@ -88,9 +88,9 @@ describe("autoRegisterShellDataSources", () => {
     expect(configs).toHaveLength(0);
   });
 
-  it("produces valid JSON with the correct structure", () => {
+  it("produces valid JSON with the correct structure", async () => {
     const sm = makeFakeStateManager(tmpDir);
-    autoRegisterShellDataSources(
+    await autoRegisterShellDataSources(
       sm as never,
       [{ name: "todo_count" }],
       "goal_json"
@@ -116,9 +116,9 @@ describe("autoRegisterShellDataSources", () => {
     expect(Object.keys(commands).length).toBeGreaterThan(0);
   });
 
-  it("creates a single datasource with multiple commands for multiple matching dimensions", () => {
+  it("creates a single datasource with multiple commands for multiple matching dimensions", async () => {
     const sm = makeFakeStateManager(tmpDir);
-    autoRegisterShellDataSources(
+    await autoRegisterShellDataSources(
       sm as never,
       [{ name: "todo_count" }, { name: "fixme_count" }],
       "goal_multi"
@@ -132,19 +132,19 @@ describe("autoRegisterShellDataSources", () => {
     expect(commands).toHaveProperty("fixme_count");
   });
 
-  it("does not create a datasource when dimensions array is empty", () => {
+  it("does not create a datasource when dimensions array is empty", async () => {
     const sm = makeFakeStateManager(tmpDir);
-    autoRegisterShellDataSources(sm as never, [], "goal_empty");
+    await autoRegisterShellDataSources(sm as never, [], "goal_empty");
 
     const configs = readDsConfigs(datasourcesDir);
     expect(configs).toHaveLength(0);
   });
 
-  it("creates the datasources directory if it does not exist", () => {
+  it("creates the datasources directory if it does not exist", async () => {
     const sm = makeFakeStateManager(tmpDir);
     expect(fs.existsSync(datasourcesDir)).toBe(false);
 
-    autoRegisterShellDataSources(
+    await autoRegisterShellDataSources(
       sm as never,
       [{ name: "todo_count" }],
       "goal_mkdir"

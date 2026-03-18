@@ -4,7 +4,7 @@
 // file-based and HTTP API data sources, plus DataSourceRegistry for managing
 // multiple adapter instances.
 
-import * as fs from "node:fs";
+import * as fsp from "node:fs/promises";
 import type {
   DataSourceType,
   DataSourceConfig,
@@ -56,7 +56,7 @@ export class FileDataSourceAdapter implements IDataSourceAdapter {
     if (!path) {
       throw new Error(`FileDataSourceAdapter [${this.sourceId}]: connection.path is required`);
     }
-    if (!fs.existsSync(path)) {
+    try { await fsp.access(path); } catch {
       throw new Error(`FileDataSourceAdapter [${this.sourceId}]: file not found: ${path}`);
     }
   }
@@ -70,7 +70,7 @@ export class FileDataSourceAdapter implements IDataSourceAdapter {
     let raw: unknown;
     let value: number | string | boolean | null;
 
-    const content = fs.readFileSync(path, "utf-8");
+    const content = await fsp.readFile(path, "utf-8");
 
     if (path.endsWith(".json")) {
       raw = JSON.parse(content);
@@ -101,7 +101,7 @@ export class FileDataSourceAdapter implements IDataSourceAdapter {
     const path = this.config.connection.path;
     if (!path) return false;
     try {
-      fs.accessSync(path, fs.constants.R_OK);
+      await fsp.access(path);
       return true;
     } catch {
       return false;
