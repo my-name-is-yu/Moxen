@@ -189,7 +189,7 @@ export class LearningPipeline {
     });
     const patterns = await this.analyzeLogs(trigger);
     if (patterns.length > 0) {
-      this.generateFeedback(patterns);
+      await this.generateFeedback(patterns);
     }
     return patterns;
   }
@@ -209,7 +209,7 @@ export class LearningPipeline {
     });
     const patterns = await this.analyzeLogs(trigger);
     if (patterns.length > 0) {
-      this.generateFeedback(patterns);
+      await this.generateFeedback(patterns);
     }
     return patterns;
   }
@@ -226,7 +226,7 @@ export class LearningPipeline {
     });
     const patterns = await this.analyzeLogs(trigger);
     if (patterns.length > 0) {
-      this.generateFeedback(patterns);
+      await this.generateFeedback(patterns);
     }
     return patterns;
   }
@@ -244,7 +244,7 @@ export class LearningPipeline {
     });
     const patterns = await this.analyzeLogs(trigger);
     if (patterns.length > 0) {
-      this.generateFeedback(patterns);
+      await this.generateFeedback(patterns);
       // Share patterns across goals if enabled
       if (this.config.cross_goal_sharing_enabled) {
         for (const pattern of patterns) {
