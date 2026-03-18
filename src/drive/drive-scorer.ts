@@ -307,5 +307,9 @@ export function scoreAllDimensions(
  * @returns new array sorted by final_score descending
  */
 export function rankDimensions(scores: DriveScore[]): DriveScore[] {
-  return [...scores].sort((a, b) => b.final_score - a.final_score);
+  return [...scores].sort((a, b) => {
+    const scoreDiff = b.final_score - a.final_score;
+    if (scoreDiff !== 0) return scoreDiff;
+    return a.dimension_name < b.dimension_name ? -1 : a.dimension_name > b.dimension_name ? 1 : 0;
+  });
 }

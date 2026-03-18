@@ -21,37 +21,13 @@ const createMockDriveSystem = (tmpDir: string) => ({
   }),
 });
 
-/** Find a free port by listening on 0 and immediately closing. */
-function getFreePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = http.createServer();
-    srv.listen(0, "127.0.0.1", () => {
-      const port = (srv.address() as { port: number }).port;
-      srv.close((err) => (err ? reject(err) : resolve(port)));
-    });
-    srv.on("error", reject);
-  });
-}
-
-/** Start an EventServer, retrying with a new free port if EADDRINUSE. */
+/** Start an EventServer on an OS-assigned port (no TOCTOU race). */
 async function startWithRetry(
-  driveSystem: ReturnType<typeof createMockDriveSystem>,
-  maxAttempts = 5
+  driveSystem: ReturnType<typeof createMockDriveSystem>
 ): Promise<{ server: EventServer; port: number }> {
-  let lastErr: unknown;
-  for (let i = 0; i < maxAttempts; i++) {
-    const p = await getFreePort();
-    const s = new EventServer(driveSystem as never, { port: p });
-    try {
-      await s.start();
-      return { server: s, port: p };
-    } catch (err: unknown) {
-      lastErr = err;
-      if ((err as NodeJS.ErrnoException).code !== "EADDRINUSE") throw err;
-      // port was grabbed between getFreePort() and start(); retry
-    }
-  }
-  throw lastErr;
+  const s = new EventServer(driveSystem as never, { port: 0 });
+  await s.start();
+  return { server: s, port: s.getPort() };
 }
 
 function postEvent(
@@ -134,8 +110,10 @@ let port: number;
 beforeEach(async () => {
   tmpDir = makeTempDir();
   mockDriveSystem = createMockDriveSystem(tmpDir);
-  port = await getFreePort();
-  server = new EventServer(mockDriveSystem as never, { port });
+  server = new EventServer(mockDriveSystem as never, { port: 0 });
+  // port will be set after start() for tests that need it; for tests that
+  // call start() themselves they must read server.getPort() afterward.
+  port = 0;
 });
 
 afterEach(async () => {
@@ -179,8 +157,7 @@ describe("start / stop", () => {
     await server.start();
     await server.stop();
 
-    const port2 = await getFreePort();
-    const server2 = new EventServer(mockDriveSystem as never, { port: port2 });
+    const server2 = new EventServer(mockDriveSystem as never, { port: 0 });
     await server2.start();
     expect(server2.isRunning()).toBe(true);
     await server2.stop();
@@ -193,6 +170,7 @@ describe("start / stop", () => {
 describe("POST /events — valid event", () => {
   beforeEach(async () => {
     await server.start();
+    port = server.getPort();
   });
 
   it("returns 200 for a valid event", async () => {
@@ -261,6 +239,7 @@ describe("POST /events — valid event", () => {
 describe("POST /events — invalid data", () => {
   beforeEach(async () => {
     await server.start();
+    port = server.getPort();
   });
 
   it("returns 400 for invalid JSON body", async () => {

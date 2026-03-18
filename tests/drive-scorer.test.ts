@@ -456,11 +456,10 @@ describe("rankDimensions", () => {
     expect(ranked).toHaveLength(0);
   });
 
-  it("equal scores maintain relative order (stable-ish — just checks all present)", () => {
-    const scores = [makeScore("a", 0.5), makeScore("b", 0.5), makeScore("c", 0.5)];
+  it("equal scores are broken by dimension_name lexicographic ascending", () => {
+    const scores = [makeScore("charlie", 0.5), makeScore("alpha", 0.5), makeScore("bravo", 0.5)];
     const ranked = rankDimensions(scores);
     expect(ranked).toHaveLength(3);
-    const names = ranked.map((s) => s.dimension_name).sort();
-    expect(names).toEqual(["a", "b", "c"]);
+    expect(ranked.map((s) => s.dimension_name)).toEqual(["alpha", "bravo", "charlie"]);
   });
 });

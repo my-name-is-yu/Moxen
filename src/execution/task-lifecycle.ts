@@ -200,7 +200,11 @@ export class TaskLifecycle {
       weighted_score: score.final_score * (weightByName.get(score.dimension_name) ?? 0.3),
     }));
 
-    weighted.sort((a, b) => b.weighted_score - a.weighted_score);
+    weighted.sort((a, b) => {
+      const scoreDiff = b.weighted_score - a.weighted_score;
+      if (scoreDiff !== 0) return scoreDiff;
+      return a.dimension_name < b.dimension_name ? -1 : a.dimension_name > b.dimension_name ? 1 : 0;
+    });
 
     return weighted[0]!.dimension_name;
   }

@@ -477,6 +477,26 @@ describe("TaskLifecycle", () => {
       const result = lifecycle.selectTargetDimension(gapVector, context, dimensions);
       expect(result).toBe("reviewed");
     });
+
+    it("breaks equal weighted scores by dimension_name lexicographic ascending", () => {
+      const llm = createMockLLMClient([]);
+      const lifecycle = createLifecycle(llm);
+
+      const gapVector = makeGapVector("goal-1", [
+        { name: "zeta", gap: 0.5 },
+        { name: "alpha", gap: 0.5 },
+        { name: "mu", gap: 0.5 },
+      ]);
+      const context = makeDriveContext(["zeta", "alpha", "mu"]);
+      const dimensions = [
+        makeDimension("zeta", "self_report"),
+        makeDimension("alpha", "self_report"),
+        makeDimension("mu", "self_report"),
+      ];
+
+      const result = lifecycle.selectTargetDimension(gapVector, context, dimensions);
+      expect(result).toBe("alpha");
+    });
   });
 
   // ─────────────────────────────────────────────
