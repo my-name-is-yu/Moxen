@@ -40,8 +40,12 @@ function progressColor(progress: number): string {
 function DimensionRow({ dim }: { dim: DimensionProgress }) {
   const bar = renderBar(dim.progress);
   const pct = String(dim.progress).padStart(3, " ") + "%";
-  // Truncate displayName to 16 chars for alignment, fallback to name if empty
-  const label = (dim.displayName || dim.name).slice(0, 16).padEnd(16, " ");
+  // bar(20) + "  "(2) + "  "(2) + pct(4) + border/padding(4) = 32 fixed chars
+  const termWidth = process.stdout.columns || 80;
+  const labelWidth = Math.max(8, Math.min(32, termWidth - 32));
+  const rawLabel = dim.displayName || dim.name;
+  const truncated = rawLabel.length > labelWidth;
+  const label = (truncated ? rawLabel.slice(0, labelWidth - 1) + "…" : rawLabel).padEnd(labelWidth, " ");
   const color = progressColor(dim.progress);
   return (
     <Box>

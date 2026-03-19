@@ -233,7 +233,7 @@ describe("ActionHandler — handle()", () => {
       expect(deps.reportingEngine.saveReport).toHaveBeenCalledOnce();
     });
 
-    it("includes report content in messages", async () => {
+    it("returns showReport with the generated report", async () => {
       const goal = makeGoal();
       const deps = makeDeps();
       vi.mocked(deps.stateManager.listGoalIds).mockReturnValue(["goal-1"]);
@@ -241,7 +241,8 @@ describe("ActionHandler — handle()", () => {
 
       const handler = new ActionHandler(deps);
       const result = await handler.handle({ intent: "report", raw: "report" });
-      expect(result.messages.join("\n")).toContain("Daily Summary");
+      expect(result.showReport).toBeDefined();
+      expect(result.showReport?.title).toContain("Daily Summary");
     });
   });
 

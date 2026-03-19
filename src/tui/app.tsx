@@ -6,7 +6,7 @@
 // Routes chat input through IntentRecognizer → ActionHandler.
 
 import React, { useState, useCallback, useEffect, useRef } from "react";
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useInput, useStdout } from "ink";
 import { Dashboard } from "./dashboard.js";
 import { Chat, type ChatMessage } from "./chat.js";
 import { HelpOverlay } from "./help-overlay.js";
@@ -37,21 +37,6 @@ interface AppProps {
   onApprovalReady?: (requestFn: (req: ApprovalRequest) => void) => void;
 }
 
-const ReportOverlay: React.FC<{ report: Report; onDismiss: () => void }> = ({
-  report,
-  onDismiss,
-}) => {
-  useInput((_input, key) => {
-    if (key.escape) onDismiss();
-  });
-  return (
-    <Box flexDirection="column" flexGrow={1} overflowY="hidden">
-      <ReportView report={report} />
-      <Text dimColor>Press ESC to close</Text>
-    </Box>
-  );
-};
-
 const StatusBar: React.FC<{
   goalCount: number;
   trustScore: number;
@@ -80,6 +65,12 @@ export function App({
   intentRecognizer,
   onApprovalReady,
 }: AppProps) {
+  // ── Terminal dimensions ──
+  const { stdout } = useStdout();
+  const termCols = stdout?.columns ?? 80;
+  const termRows = stdout?.rows ?? 24;
+  const showSidebar = termCols >= 80;
+
   // ── Loop state via hook ──
   const { loopState, start, stop, getController } = useLoop(coreLoop, stateManager, trustManager);
 
@@ -207,7 +198,7 @@ export function App({
   // Overlays (approval, help) replace the chat pane when active.
 
   return (
-    <Box flexDirection="column" height={process.stdout.rows || 24}>
+    <Box flexDirection="column" height={termRows}>
       {/* App header */}
       <Text bold color="blue">
         [ MOTIVA ]
@@ -215,16 +206,18 @@ export function App({
 
       {/* Main content: sidebar + chat */}
       <Box flexDirection="row" flexGrow={1}>
-        {/* ── Left sidebar: Dashboard ── */}
-        <Box
-          flexDirection="column"
-          width="30%"
-          borderStyle="single"
-          borderColor="gray"
-          paddingX={1}
-        >
-          <Dashboard state={loopState} />
-        </Box>
+        {/* ── Left sidebar: Dashboard (hidden when terminal is too narrow) ── */}
+        {showSidebar && (
+          <Box
+            flexDirection="column"
+            width="30%"
+            borderStyle="single"
+            borderColor="gray"
+            paddingX={1}
+          >
+            <Dashboard state={loopState} />
+          </Box>
+        )}
 
         {/* ── Right pane: Chat / overlays ── */}
         <Box flexDirection="column" flexGrow={1}>
