@@ -1,32 +1,24 @@
 # In-Progress
 
-## 前セッション完了（2026-03-19）: M14フォローアップ
+## 今回のセッション完了（2026-03-19）: バグ修正3件（#70, #72, #73）
 
-### コミット（未push）
-- 06153bf: feat: add hypothesis verification mechanism (Milestone 14)
-- (pending): M14フォローアップ
-  - global stallに`recordDecision`/`incrementEscalation`/`incrementPivotCount`追加
-  - `isGoalComplete()`で`converged_satisficed`を完了扱いに統合
-  - 低confidence + converged_satisficed ブロック修正
-  - global stall空dimensionガード追加
-  - 4新テスト追加
+### コミット
+- ba334b1: fix: eliminate silent error swallowing in 3 modules (#70, #72, #73)
+  - `src/reporting-engine.ts`: deliverReport `.catch(() => {})` → `console.warn` でログ出力
+  - `src/llm/codex-llm-client.ts`: 5箇所の `_cleanupTmp .catch(() => {})` → `console.debug`
+  - `src/traits/trust-manager.ts`: 2箇所の `void pluginLoader.updatePluginState()` → `.catch(console.warn)`
+  - `src/runtime/logger.ts`: `this.stream!.end` → `this.stream.end`（冗長な non-null assertion 除去）
 
-### テスト状態: 3734 passed (123 files)
-
-### 起票済みissue
-- #66 dogfooding: M14 stall recovery実環境検証
-- #67 judgeTreeCompletionでのconverged_satisficed伝播
+### テスト状態: 3741 tests, 155 files パス
 
 ---
 
-## 次に取り組むべきもの（優先順）
+## 次に取り組む候補
 
-### 1. コード品質改善（低優先）
-- #52 テスト巨大ファイル分割
-- #53 as any / 非null assertion 削減
-- #54 fs同期API→async移行
+### コード品質
+- #71 500行超ファイル19件の分割（最大: task-verifier.ts 764行）
 
-### 2. 将来機能（ロードマップ）
+### 機能（ロードマップ）
 - #24 永続運用（cron/スケジューラ）
 - #25 プロアクティブ通知
 - #26 現実世界DataSource
@@ -38,4 +30,3 @@
 - #32 ゴール交渉の対話的UX
 - #33 マルチエージェント委譲
 - #66 dogfooding: M14 stall recovery検証
-- #67 converged_satisficed ツリーゴール伝播
