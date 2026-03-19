@@ -264,7 +264,7 @@ export class PortfolioManager {
       result.terminated_strategies.length > 0
     ) {
       result.new_generation_needed = true;
-      this.recordRebalance(goalId, result);
+      await this.recordRebalance(goalId, result);
       return result;
     }
 
