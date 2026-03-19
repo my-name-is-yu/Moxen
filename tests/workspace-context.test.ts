@@ -95,6 +95,50 @@ describe("createWorkspaceContextProvider — external file reading", () => {
     expect(result).not.toContain("External file: " + largePath);
   });
 
+  it("does NOT read ~/.ssh/id_rsa (denied prefix)", async () => {
+    const sshPath = path.join(os.homedir(), ".ssh", "id_rsa");
+    const provider = createWorkspaceContextProvider(
+      { workDir },
+      () => `Inspect ${sshPath} for issues`
+    );
+
+    const result = await provider("goal-denied-ssh", "security");
+    expect(result).not.toContain(`External file: ${sshPath}`);
+  });
+
+  it("does NOT read ~/.aws/credentials (denied prefix)", async () => {
+    const awsPath = path.join(os.homedir(), ".aws", "credentials");
+    const provider = createWorkspaceContextProvider(
+      { workDir },
+      () => `Read ${awsPath}`
+    );
+
+    const result = await provider("goal-denied-aws", "security");
+    expect(result).not.toContain(`External file: ${awsPath}`);
+  });
+
+  it("does NOT read ~/.gnupg/private-keys-v1.d (denied prefix)", async () => {
+    const gnupgPath = path.join(os.homedir(), ".gnupg", "private-keys-v1.d");
+    const provider = createWorkspaceContextProvider(
+      { workDir },
+      () => `Check ${gnupgPath}`
+    );
+
+    const result = await provider("goal-denied-gnupg", "security");
+    expect(result).not.toContain(`External file: ${gnupgPath}`);
+  });
+
+  it("does NOT read ~/.config/some-app/token (denied prefix)", async () => {
+    const configPath = path.join(os.homedir(), ".config", "some-app", "token");
+    const provider = createWorkspaceContextProvider(
+      { workDir },
+      () => `Use token from ${configPath}`
+    );
+
+    const result = await provider("goal-denied-config", "security");
+    expect(result).not.toContain(`External file: ${configPath}`);
+  });
+
   it("deduplicates the same path mentioned multiple times", async () => {
     const tmpPath = path.join("/tmp", `motiva-dedup-${Date.now()}.txt`);
     writeTmpFile(tmpPath, "dedup content");

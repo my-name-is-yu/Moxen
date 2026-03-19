@@ -11,6 +11,14 @@ export interface WorkspaceContextOptions {
 
 const ALLOWED_EXTERNAL_PREFIXES = [os.homedir(), "/tmp"];
 
+const DENIED_PREFIXES = [
+  path.join(os.homedir(), '.ssh'),
+  path.join(os.homedir(), '.aws'),
+  path.join(os.homedir(), '.gnupg'),
+  path.join(os.homedir(), '.config'),
+  path.join(os.homedir(), '.env'),
+];
+
 /**
  * Extract absolute file paths from a text string.
  * Matches paths starting with / that look like file paths.
@@ -38,11 +46,16 @@ function extractRelativePaths(text: string): string[] {
 }
 
 /**
- * Returns true if the resolved path is under an allowed prefix.
- * Allowed: home directory or /tmp.
+ * Returns true if the resolved path is under an allowed prefix
+ * and not under any denied prefix (sensitive directories).
+ * Allowed: home directory or /tmp, except sensitive subdirectories.
  */
 function isAllowedExternalPath(filePath: string): boolean {
   const resolved = path.resolve(filePath);
+  const isDenied = DENIED_PREFIXES.some(
+    (prefix) => resolved.startsWith(prefix + path.sep) || resolved === prefix
+  );
+  if (isDenied) return false;
   return ALLOWED_EXTERNAL_PREFIXES.some(
     (prefix) => resolved.startsWith(prefix + path.sep) || resolved === prefix
   );
