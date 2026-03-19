@@ -199,6 +199,7 @@ export async function detectStallsAndRebalance(
               goal_id: goalId,
               goal_type: goalType,
               strategy_id: strategyIdForRecord,
+              hypothesis: activeStrategyForRecord?.hypothesis,
               decision: analysis?.recommended_action ?? "pivot",
               context: {
                 gap_value: latestGap,
@@ -313,6 +314,7 @@ export async function detectStallsAndRebalance(
               goal_id: goalId,
               goal_type: goalType,
               strategy_id: globalStrategyIdForRecord,
+              hypothesis: globalActiveStrategyForRecord?.hypothesis,
               decision: globalAnalysis?.recommended_action ?? "pivot",
               context: {
                 gap_value: latestGap,

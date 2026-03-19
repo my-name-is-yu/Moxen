@@ -321,7 +321,8 @@ export class StrategyManagerBase {
     // Pivot → -1, Success → +1, Others → 0
     const scoreMap = new Map<string, number>();
     for (const record of records) {
-      const key = record.strategy_id;
+      const key = record.hypothesis;
+      if (!key) continue;
       const existing = scoreMap.get(key) ?? 0;
       if (record.decision === "pivot" && record.outcome !== "success") {
         scoreMap.set(key, existing - 1);
@@ -332,7 +333,7 @@ export class StrategyManagerBase {
 
     const scored = candidates.map((c) => ({
       candidate: c,
-      score: scoreMap.get(c.id) ?? 0,
+      score: scoreMap.get(c.hypothesis) ?? 0,
     }));
 
     // Stable sort: higher score first (ties keep original order)

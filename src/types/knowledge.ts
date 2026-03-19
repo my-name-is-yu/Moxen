@@ -140,6 +140,7 @@ export const DecisionRecordSchema = z.object({
   goal_id: z.string(),
   goal_type: z.string(),
   strategy_id: z.string(),
+  hypothesis: z.string().optional(),
   decision: z.enum(["proceed", "refine", "pivot", "escalate"]),
   context: DecisionContextSchema,
   outcome: z.enum(["success", "failure", "pending"]),
