@@ -18,6 +18,7 @@ import {
   type LoopConfig,
   type LoopIterationResult,
 } from "./core-loop-types.js";
+import { logRewardComputation } from "../drive/reward-log.js";
 
 /** Minimal context passed to every phase function. */
 export interface PhaseCtx {
@@ -201,6 +202,21 @@ export async function scoreDrivesAndCheckKnowledge(
     if (ctx.deps.driveScoreAdapter) {
       ctx.deps.driveScoreAdapter.update(driveScores);
     }
+
+    // Consolidated reward computation log (MOTIVA_REWARD_LOG=1 to enable)
+    const confidenceAvg =
+      gapVector.gaps.reduce((sum, g) => sum + g.confidence, 0) /
+      Math.max(gapVector.gaps.length, 1);
+    logRewardComputation({
+      goalId,
+      iteration: loopIndex,
+      gapAggregate: result.gapAggregate ?? 0,
+      confidenceAvg,
+      // TODO: wire to TrustManager once available in phase context
+      trustScore: null,
+      driveScores,
+      completionJudgment: null,
+    });
   } catch (err) {
     result.error = `Drive scoring failed: ${err instanceof Error ? err.message : String(err)}`;
     ctx.logger?.error(`CoreLoop: ${result.error}`, { goalId });
