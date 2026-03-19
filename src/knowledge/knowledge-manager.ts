@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import * as fsp from "node:fs/promises";
+import * as path from "node:path";
 import { z } from "zod";
 import { StateManager } from "../state-manager.js";
 import type { ILLMClient } from "../llm/llm-client.js";
@@ -10,6 +12,7 @@ import {
   KnowledgeGapSignalSchema,
   ContradictionResultSchema,
   SharedKnowledgeEntrySchema,
+  DecisionRecordSchema,
   REVALIDATION_SCHEDULE,
 } from "../types/knowledge.js";
 import type {
@@ -19,6 +22,7 @@ import type {
   ContradictionResult,
   SharedKnowledgeEntry,
   DomainStability,
+  DecisionRecord,
 } from "../types/knowledge.js";
 import type { VectorIndex } from "./vector-index.js";
 import type { IEmbeddingClient } from "./embedding-client.js";
@@ -593,6 +597,101 @@ Determine if there is a factual contradiction. Respond with JSON:
    */
   async generateRevalidationTasks(staleEntries: SharedKnowledgeEntry[]): Promise<Task[]> {
     return generateRevalidationTasks(staleEntries);
+  }
+
+  // ─── Decision History (M14-S3) ───
+
+  /**
+   * Save a DecisionRecord to ~/.motiva/decisions/<goalId>-<timestamp>.json
+   */
+  async recordDecision(record: DecisionRecord): Promise<void> {
+    const parsed = DecisionRecordSchema.parse(record);
+    const decisionsDir = path.join(this.stateManager.getBaseDir(), "decisions");
+    await fsp.mkdir(decisionsDir, { recursive: true });
+    const filename = `${parsed.goal_id}-${parsed.timestamp.replace(/[:.]/g, "-")}.json`;
+    const filePath = path.join(decisionsDir, filename);
+    await fsp.writeFile(filePath, JSON.stringify(parsed, null, 2), "utf-8");
+  }
+
+  /**
+   * Load decision records filtered by goal_type, sorted by recency.
+   * Applies time-decay scoring (1.0 at day 0, 0.0 at day 30+).
+   */
+  async queryDecisions(goalType: string, limit: number = 20): Promise<DecisionRecord[]> {
+    const decisionsDir = path.join(this.stateManager.getBaseDir(), "decisions");
+    let files: string[];
+    try {
+      files = await fsp.readdir(decisionsDir);
+    } catch {
+      return [];
+    }
+
+    const records: DecisionRecord[] = [];
+    for (const file of files) {
+      if (!file.endsWith(".json")) continue;
+      try {
+        const content = await fsp.readFile(path.join(decisionsDir, file), "utf-8");
+        const raw = JSON.parse(content) as unknown;
+        const record = DecisionRecordSchema.parse(raw);
+        if (record.goal_type === goalType) {
+          records.push(record);
+        }
+      } catch {
+        // Skip invalid files
+      }
+    }
+
+    // Sort by recency (newest first), with time-decay weight applied
+    records.sort((a, b) => {
+      const wa = this._calculateTimeDecayWeight(a.timestamp);
+      const wb = this._calculateTimeDecayWeight(b.timestamp);
+      if (wb !== wa) return wb - wa;
+      return new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime();
+    });
+
+    return records.slice(0, limit);
+  }
+
+  /**
+   * Remove decision records older than 90 days.
+   * Returns the count of purged records.
+   */
+  async purgeOldDecisions(): Promise<number> {
+    const decisionsDir = path.join(this.stateManager.getBaseDir(), "decisions");
+    let files: string[];
+    try {
+      files = await fsp.readdir(decisionsDir);
+    } catch {
+      return 0;
+    }
+
+    const cutoff = Date.now() - 90 * 24 * 60 * 60 * 1000;
+    let purged = 0;
+    for (const file of files) {
+      if (!file.endsWith(".json")) continue;
+      const filePath = path.join(decisionsDir, file);
+      try {
+        const content = await fsp.readFile(filePath, "utf-8");
+        const raw = JSON.parse(content) as unknown;
+        const record = DecisionRecordSchema.parse(raw);
+        if (new Date(record.timestamp).getTime() < cutoff) {
+          await fsp.unlink(filePath);
+          purged++;
+        }
+      } catch {
+        // Skip invalid files
+      }
+    }
+    return purged;
+  }
+
+  /**
+   * Linear decay: 1.0 at day 0, 0.0 at day 30+.
+   */
+  private _calculateTimeDecayWeight(timestamp: string): number {
+    const ageMs = Date.now() - new Date(timestamp).getTime();
+    const ageDays = ageMs / (1000 * 60 * 60 * 24);
+    return Math.max(0, 1 - ageDays / 30);
   }
 
   // ─── Private Helpers ───

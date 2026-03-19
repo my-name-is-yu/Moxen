@@ -5,6 +5,7 @@ import type { Strategy, Portfolio } from "../types/strategy.js";
 import type { StrategyState } from "../types/core.js";
 import type { ILLMClient } from "../llm/llm-client.js";
 import type { KnowledgeGapSignal } from "../types/knowledge.js";
+import type { KnowledgeManager } from "../knowledge/knowledge-manager.js";
 import {
   VALID_TRANSITIONS,
   StrategyArraySchema,
@@ -20,13 +21,21 @@ import {
 export class StrategyManagerBase {
   protected readonly stateManager: StateManager;
   protected readonly llmClient: ILLMClient;
+  /** Optional KnowledgeManager for decision-history-aware strategy selection (M14-S3). */
+  protected knowledgeManager?: KnowledgeManager;
 
   /** In-memory index: strategyId → goalId */
   protected readonly strategyIndex: Map<string, string> = new Map();
 
-  constructor(stateManager: StateManager, llmClient: ILLMClient) {
+  constructor(stateManager: StateManager, llmClient: ILLMClient, knowledgeManager?: KnowledgeManager) {
     this.stateManager = stateManager;
     this.llmClient = llmClient;
+    this.knowledgeManager = knowledgeManager;
+  }
+
+  /** Inject or update KnowledgeManager after construction (e.g., when KM is instantiated after SM). */
+  setKnowledgeManager(km: KnowledgeManager): void {
+    this.knowledgeManager = km;
   }
 
   // ─── Core Lifecycle Methods ───
@@ -195,10 +204,14 @@ export class StrategyManagerBase {
    * - stallCount === 1: return null (no strategy change; notify only)
    * - stallCount >= 2: terminate current strategy, generate new candidates, activate best
    * - If no candidates can be generated: return null
+   *
+   * When knowledgeManager is available and goalType is given, past decision history
+   * is used to deprioritize previously-pivoted strategies (M14-S3).
    */
   async onStallDetected(
     goalId: string,
-    stallCount: number
+    stallCount: number,
+    goalType?: string
   ): Promise<Strategy | null> {
     if (stallCount < 2) {
       return null;
@@ -247,10 +260,86 @@ export class StrategyManagerBase {
       return null;
     }
 
+    // M14-S3: Apply decision history to reorder candidates when enough data available
+    if (this.knowledgeManager && goalType) {
+      try {
+        const reordered = await this._rankCandidatesByDecisionHistory(
+          candidates,
+          goalType
+        );
+        if (reordered.length > 0) {
+          // Persist reordered candidates into portfolio
+          const portfolio = await this.loadOrCreatePortfolio(goalId);
+          portfolio.strategies = portfolio.strategies.map((s) => {
+            const idx = reordered.findIndex((r) => r.id === s.id);
+            return idx >= 0 ? (reordered[idx] as Strategy) : s;
+          });
+          await this.savePortfolio(goalId, portfolio);
+        }
+      } catch {
+        // non-fatal: fall through to default selection
+      }
+    }
+
     try {
       return await this.activateBestCandidate(goalId);
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * M14-S3: Rank candidates using past decision history.
+   * Strategies that were previously PIVOTed are deprioritized (moved to end).
+   * Strategies that succeeded are prioritized (moved to front).
+   * Falls back to original order when < 3 records exist.
+   */
+  protected async _rankCandidatesByDecisionHistory(
+    candidates: Strategy[],
+    goalType: string
+  ): Promise<Strategy[]> {
+    if (!this.knowledgeManager) return candidates;
+
+    const records = await this.knowledgeManager.queryDecisions(goalType, 50);
+
+    // Fallback: < 3 records → use existing logic
+    if (records.length < 3) {
+      return candidates;
+    }
+
+    // Build score map: hypothesis text → adjustment
+    // Pivot → -1, Success → +1, Others → 0
+    const scoreMap = new Map<string, number>();
+    for (const record of records) {
+      const key = record.strategy_id;
+      const existing = scoreMap.get(key) ?? 0;
+      if (record.decision === "pivot" && record.outcome !== "success") {
+        scoreMap.set(key, existing - 1);
+      } else if (record.outcome === "success") {
+        scoreMap.set(key, existing + 1);
+      }
+    }
+
+    const scored = candidates.map((c) => ({
+      candidate: c,
+      score: scoreMap.get(c.id) ?? 0,
+    }));
+
+    // Stable sort: higher score first (ties keep original order)
+    scored.sort((a, b) => b.score - a.score);
+    return scored.map((s) => s.candidate);
+  }
+
+  /**
+   * Increment the pivot_count on a strategy and persist the portfolio.
+   * No-op if the strategy is not found.
+   */
+  async incrementPivotCount(goalId: string, strategyId: string): Promise<void> {
+    const portfolio = await this.loadOrCreatePortfolio(goalId);
+    const strategy = portfolio.strategies.find((s) => s.id === strategyId);
+    if (strategy) {
+      strategy.pivot_count = (strategy.pivot_count ?? 0) + 1;
+      await this.savePortfolio(goalId, portfolio);
     }
   }
 

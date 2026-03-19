@@ -46,6 +46,11 @@ export const StrategySchema = z.object({
   // Stage 14: Cross-goal strategy fields
   source_template_id: z.string().nullable().default(null),
   cross_goal_context: z.string().nullable().default(null),
+
+  // M14-S2: Structured PIVOT/REFINE/ESCALATE fields
+  rollback_target_id: z.string().nullable().default(null),
+  max_pivot_count: z.number().int().min(0).default(2),
+  pivot_count: z.number().int().min(0).default(0),
 });
 export type Strategy = z.infer<typeof StrategySchema>;
 

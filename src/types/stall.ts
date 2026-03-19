@@ -1,6 +1,16 @@
 import { z } from "zod";
 import { StallTypeEnum, StallCauseEnum } from "./core.js";
 
+// --- StallAnalysis (M14-S2: cause analysis for PIVOT/REFINE/ESCALATE) ---
+
+export const StallAnalysisSchema = z.object({
+  cause: z.enum(["parameter_issue", "strategy_wrong", "goal_unreachable"]),
+  confidence: z.number().min(0).max(1),
+  evidence: z.string(),
+  recommended_action: z.enum(["refine", "pivot", "escalate"]),
+});
+export type StallAnalysis = z.infer<typeof StallAnalysisSchema>;
+
 // --- StallDetector types ---
 
 export const StallReportSchema = z.object({

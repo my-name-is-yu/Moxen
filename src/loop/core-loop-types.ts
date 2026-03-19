@@ -26,7 +26,7 @@ import type { Goal } from "../types/goal.js";
 import type { GapVector } from "../types/gap.js";
 import type { DriveContext, DriveScore } from "../types/drive.js";
 import type { CompletionJudgment } from "../types/satisficing.js";
-import type { StallReport } from "../types/stall.js";
+import type { StallReport, StallAnalysis } from "../types/stall.js";
 
 // ─── GapCalculator module interface (pure functions) ───
 
@@ -106,6 +106,8 @@ export interface LoopIterationResult {
   taskResult: TaskCycleResult | null;
   stallDetected: boolean;
   stallReport: StallReport | null;
+  /** M14-S2: cause analysis result when a stall is detected */
+  stallAnalysis?: StallAnalysis;
   pivotOccurred: boolean;
   completionJudgment: CompletionJudgment;
   elapsedMs: number;

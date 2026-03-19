@@ -1,6 +1,6 @@
 import { StateManager } from "../state-manager.js";
-import { StallReportSchema, StallStateSchema } from "../types/stall.js";
-import type { StallReport, StallState } from "../types/stall.js";
+import { StallReportSchema, StallStateSchema, StallAnalysisSchema } from "../types/stall.js";
+import type { StallReport, StallState, StallAnalysis } from "../types/stall.js";
 import type { CharacterConfig } from "../types/character.js";
 import { DEFAULT_CHARACTER_CONFIG } from "../types/character.js";
 
@@ -246,6 +246,94 @@ export class StallDetector {
       default:
         return "approach_failure";
     }
+  }
+
+  /**
+   * Analyze the root cause of a stall from gap history.
+   * Returns a StallAnalysis with cause, confidence, evidence, and recommended_action.
+   *
+   * Patterns:
+   *   - oscillating (high variance, stable mean) → parameter_issue → REFINE
+   *   - flat (near-zero variance, near-zero delta) → strategy_wrong → PIVOT
+   *   - diverging (monotonically increasing trend) → goal_unreachable → ESCALATE
+   *   - fallback (unclear) → strategy_wrong → PIVOT
+   */
+  analyzeStallCause(gapHistory: Array<{ normalized_gap: number }>): StallAnalysis {
+    const MIN_ENTRIES = 3;
+
+    if (gapHistory.length < MIN_ENTRIES) {
+      return StallAnalysisSchema.parse({
+        cause: "strategy_wrong",
+        confidence: 0.3,
+        evidence: `Insufficient history (${gapHistory.length} entries, need ${MIN_ENTRIES})`,
+        recommended_action: "pivot",
+      });
+    }
+
+    const gaps = gapHistory.map((e) => e.normalized_gap);
+    const n = gaps.length;
+
+    // Mean
+    const mean = gaps.reduce((s, v) => s + v, 0) / n;
+
+    // Variance
+    const variance =
+      gaps.reduce((s, v) => s + (v - mean) ** 2, 0) / n;
+
+    // Delta (latest − oldest, positive means gap grew = worse)
+    const delta = gaps[n - 1] - gaps[0];
+
+    // Check divergence: monotonically increasing (gap grows each step)
+    let monotonicallyIncreasing = true;
+    for (let i = 1; i < n; i++) {
+      if (gaps[i] <= gaps[i - 1]) {
+        monotonicallyIncreasing = false;
+        break;
+      }
+    }
+
+    if (monotonicallyIncreasing && delta > 0.05) {
+      return StallAnalysisSchema.parse({
+        cause: "goal_unreachable",
+        confidence: 0.8,
+        evidence: `Gap is monotonically increasing (delta=${delta.toFixed(3)})`,
+        recommended_action: "escalate",
+      });
+    }
+
+    // Check oscillation: high variance + mean stays stable (|delta| small)
+    const HIGH_VARIANCE_THRESHOLD = 0.01;
+    const STABLE_DELTA_THRESHOLD = 0.05;
+
+    if (variance > HIGH_VARIANCE_THRESHOLD && Math.abs(delta) < STABLE_DELTA_THRESHOLD) {
+      return StallAnalysisSchema.parse({
+        cause: "parameter_issue",
+        confidence: 0.75,
+        evidence: `Oscillating gap (variance=${variance.toFixed(4)}, delta=${delta.toFixed(3)})`,
+        recommended_action: "refine",
+      });
+    }
+
+    // Check flat: very low variance + small delta
+    const LOW_VARIANCE_THRESHOLD = 0.005;
+    const LOW_DELTA_THRESHOLD = 0.05;
+
+    if (variance <= LOW_VARIANCE_THRESHOLD && Math.abs(delta) < LOW_DELTA_THRESHOLD) {
+      return StallAnalysisSchema.parse({
+        cause: "strategy_wrong",
+        confidence: 0.75,
+        evidence: `Flat gap with no progress (variance=${variance.toFixed(4)}, delta=${delta.toFixed(3)})`,
+        recommended_action: "pivot",
+      });
+    }
+
+    // Default fallback
+    return StallAnalysisSchema.parse({
+      cause: "strategy_wrong",
+      confidence: 0.5,
+      evidence: `Unclear pattern (variance=${variance.toFixed(4)}, delta=${delta.toFixed(3)})`,
+      recommended_action: "pivot",
+    });
   }
 
   /**

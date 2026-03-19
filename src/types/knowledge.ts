@@ -124,3 +124,25 @@ export const SharedKnowledgeEntrySchema = KnowledgeEntrySchema.extend({
   revalidation_due_at: z.string().nullable().default(null),
 });
 export type SharedKnowledgeEntry = z.infer<typeof SharedKnowledgeEntrySchema>;
+
+// --- DecisionRecord (M14-S3: Decision history learning loop) ---
+
+export const DecisionContextSchema = z.object({
+  gap_value: z.number(),
+  stall_count: z.number().int(),
+  cycle_count: z.number().int(),
+  trust_score: z.number(),
+});
+export type DecisionContext = z.infer<typeof DecisionContextSchema>;
+
+export const DecisionRecordSchema = z.object({
+  id: z.string(),
+  goal_id: z.string(),
+  goal_type: z.string(),
+  strategy_id: z.string(),
+  decision: z.enum(["proceed", "refine", "pivot", "escalate"]),
+  context: DecisionContextSchema,
+  outcome: z.enum(["success", "failure", "pending"]),
+  timestamp: z.string(),
+});
+export type DecisionRecord = z.infer<typeof DecisionRecordSchema>;

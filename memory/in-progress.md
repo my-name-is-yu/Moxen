@@ -1,28 +1,52 @@
 # In-Progress
 
-## 今セッション完了（2026-03-19）: #54 テスト修正 残り5件→0件
+## 前セッション完了（2026-03-19）: Milestone 14 実装完了
 
-### 未コミット修正
-- tests/learning-pipeline.test.ts: async/await漏れ多数修正（it()にasync追加12箇所、await追加22箇所、makePatternAndFeedback async化、pipeline2 await追加、.resolves修正）
-- tests/strategy-manager.test.ts: terminateStrategy — `.not.toThrow()` → `resolves.toBeDefined()` に修正
-- tests/tree-loop-orchestrator.test.ts: resumeNodeLoop — `await` 追加
-- tests/tui/use-loop.test.ts: `void ctrl.start()` → `await ctrl.start()` に修正（4テスト）
+### コミット（未コミット — ステージング待ち）
+- M14-S1: SatisficingJudge収束判定強化（converged_satisficed / convergence_stalled）
+- M14-S2: StallDetector.analyzeStallCause() + PIVOT/REFINE/ESCALATE 3方向分岐
+- M14-S3: DecisionRecord学習ループ（KnowledgeManager.recordDecision/queryDecisions）
 
-### テスト状態: 0 failed / 3664 passed (3664 total, 119 files) ✅
-- 前セッション: 5 failed → 0 failed
-- tsc: 0エラー ✅
+### 変更ファイル
+- src/types/completion.ts — convergence_status追加
+- src/types/stall.ts — StallAnalysisSchema追加
+- src/types/core.ts — StallCauseEnum拡張
+- src/types/strategy.ts — rollback_target_id, max_pivot_count, pivot_count追加
+- src/types/decision.ts — 新規（DecisionRecordSchema）
+- src/drive/satisficing-judge.ts — checkConvergence(), 収束判定統合
+- src/drive/stall-detector.ts — analyzeStallCause()
+- src/loop/core-loop-phases-b.ts — detectStallsAndRebalance 3方向分岐 + 判断記録
+- src/loop/core-loop-types.ts — stallAnalysis field追加
+- src/strategy/strategy-manager.ts — incrementPivotCount, decision history参照
+- src/strategy/strategy-manager-base.ts — incrementPivotCount, getActiveStrategyPivotInfo
+- src/knowledge-manager.ts — recordDecision, queryDecisions, purgeOldDecisions
+- tests/satisficing-judge-convergence.test.ts — 新規（12テスト）
+- tests/stall-detector-analysis.test.ts — 新規（11テスト）
+- tests/decision-record.test.ts — 新規（14テスト）
+
+### テスト状態: 3723 passed (122 files)
 
 ---
 
-## 前セッション完了（2026-03-18）
-- c144350: E2E ENOENT race condition修正
-- 298e0bd: ENOENT resilience完了
-- fa0055a: async/mock テスト修正25件（11ファイル）
+## 次に取り組むべきもの（優先順）
 
-## issueステータス
-- #54 テスト修正 — ✅ 全件完了（要コミット）
-- #63 CLI logger — ✅ 修正済み
-- #64 ShellDataSource coverage 0 — 未着手
-- #65 Gap > 1.0 — 未着手
-- #52 テスト巨大ファイル — オープン
-- #62 EthicsVerdict定数重複 — 未着手
+### 1. M14フォローアップ
+- グローバルstallでもanalyzeStallCause呼び出し（reviewer指摘）
+- dogfooding検証（stall発生ゴールで自律回復確認）
+
+### 2. コード品質改善（低優先）
+- #52 テスト巨大ファイル分割
+- #53 as any / 非null assertion 削減
+- #54 fs同期API→async移行
+
+### 3. 将来機能（ロードマップ）
+- #24 永続運用（cron/スケジューラ）
+- #25 プロアクティブ通知
+- #26 現実世界DataSource
+- #27 知識自律獲得
+- #28 ツール自律調達
+- #29 時間軸戦略
+- #30 Web UI
+- #31 CLIコマンド plugin list/install/remove
+- #32 ゴール交渉の対話的UX
+- #33 マルチエージェント委譲
