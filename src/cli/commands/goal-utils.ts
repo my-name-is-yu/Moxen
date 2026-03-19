@@ -106,7 +106,7 @@ export async function autoRegisterFileExistenceDataSources(
       !/_exists$|_file$|file_existence/.test(d.name)
     );
     if (nonFileExistenceDims.length >= 1) {
-      console.log(
+      getCliLogger().info(
         `[auto] Skipping FileExistenceDataSource auto-registration: goal has ${nonFileExistenceDims.length} non-FileExistence dimensions that should take priority`
       );
       return;
@@ -180,7 +180,7 @@ export async function autoRegisterFileExistenceDataSources(
     const configPath = path.join(datasourcesDir, `${id}.json`);
     await writeJsonFile(configPath, config);
 
-    console.log(
+    getCliLogger().info(
       `[auto] Registered FileExistenceDataSource for: ${Object.keys(dimensionMapping).join(", ")}`
     );
   } catch (err) {
@@ -230,7 +230,7 @@ export async function autoRegisterShellDataSources(
     const configPath = path.join(datasourcesDir, `${id}.json`);
     await writeJsonFile(configPath, config);
 
-    console.log(
+    getCliLogger().info(
       `[auto] Registered ShellDataSource for: ${Object.keys(matchedCommands).join(", ")}`
     );
   } catch (err) {

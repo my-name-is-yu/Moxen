@@ -63,7 +63,7 @@ export async function cmdStart(
     logger,
   });
 
-  console.log(`Starting Motiva daemon for goals: ${goalIds.join(", ")}`);
+  logger.info(`Starting Motiva daemon for goals: ${goalIds.join(", ")}`);
   await daemon.start(goalIds);
 }
 

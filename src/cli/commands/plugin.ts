@@ -143,7 +143,7 @@ export async function cmdPluginInstall(pluginsDir: string | undefined, argv: str
   }
 
   if (manifest.permissions.shell) {
-    console.log(`Warning: plugin "${manifest.name}" requests shell execution permission.`);
+    getCliLogger().warn(`Plugin "${manifest.name}" requests shell execution permission.`);
   }
 
   console.log(`Plugin "${manifest.name}" v${manifest.version} installed.`);
