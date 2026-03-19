@@ -258,8 +258,8 @@ export class Logger {
             // File may not exist — ignore
           });
         }
-      } catch {
-        // Ignore rotation errors
+      } catch (err) {
+        console.error("[Logger] rotation error:", err instanceof Error ? err.message : err);
       }
 
       this.streamSize = 0;
