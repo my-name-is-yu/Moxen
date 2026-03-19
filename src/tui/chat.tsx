@@ -8,7 +8,7 @@ import React, { useState } from "react";
 import { Box, Text, useInput } from "ink";
 import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
-import { renderMarkdownLines, type MarkdownLine } from "./markdown-renderer.js";
+import { renderMarkdownLines, type MarkdownLine, type MarkdownSegment } from "./markdown-renderer.js";
 
 export interface ChatMessage {
   role: "user" | "motiva";
@@ -48,6 +48,26 @@ function formatTime(date: Date): string {
   });
 }
 
+/** Render a single inline segment with its formatting */
+function SegmentComponent({ seg, baseColor }: { seg: MarkdownSegment; baseColor?: string }) {
+  if (seg.bold && seg.italic) {
+    return <Text bold italic color={seg.color ?? baseColor}>{seg.text}</Text>;
+  }
+  if (seg.bold) {
+    return <Text bold color={seg.color ?? baseColor}>{seg.text}</Text>;
+  }
+  if (seg.italic) {
+    return <Text italic color={seg.color ?? baseColor}>{seg.text}</Text>;
+  }
+  if (seg.code) {
+    return <Text color="cyan">{seg.text}</Text>;
+  }
+  if (seg.color) {
+    return <Text color={seg.color}>{seg.text}</Text>;
+  }
+  return <Text color={baseColor}>{seg.text}</Text>;
+}
+
 /** Render a single MarkdownLine with appropriate styling */
 function MarkdownLineComponent({
   line,
@@ -56,15 +76,26 @@ function MarkdownLineComponent({
   line: MarkdownLine;
   color?: string;
 }) {
-  const props: Record<string, unknown> = {};
-  if (line.bold) props.bold = true;
-  if (line.dim) props.dimColor = true;
-  if (color) props.color = color;
-
   // Empty line -> render as blank space
   if (line.text === "") {
     return <Text> </Text>;
   }
+
+  // Lines with inline segments (formatted text or syntax-highlighted code)
+  if (line.segments && line.segments.length > 0) {
+    return (
+      <Box flexDirection="row" flexWrap="wrap">
+        {line.segments.map((seg, i) => (
+          <SegmentComponent key={i} seg={seg} baseColor={color} />
+        ))}
+      </Box>
+    );
+  }
+
+  const props: Record<string, unknown> = {};
+  if (line.bold) props.bold = true;
+  if (line.dim) props.dimColor = true;
+  if (color) props.color = color;
 
   return <Text {...props}>{line.text}</Text>;
 }
@@ -210,6 +241,7 @@ export function Chat({ messages, onSubmit, isProcessing }: ChatProps) {
                 value={input}
                 onChange={(val) => { setInput(val); }}
                 onSubmit={handleSubmit}
+                placeholder="/ でコマンド一覧"
               />
             </Box>
             <Text dimColor>{borderLine}</Text>
