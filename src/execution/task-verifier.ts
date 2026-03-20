@@ -42,6 +42,15 @@ export interface FailureResult {
   task: Task;
 }
 
+// ─── CompletionJudgerResponseSchema: Zod schema for LLM completion judgment response ───
+
+const CompletionJudgerResponseSchema = z.object({
+  verdict: z.enum(["pass", "partial", "fail"]).default("fail"),
+  reasoning: z.string().default(""),
+  criteria_met: z.number().int().min(0).optional(),
+  criteria_total: z.number().int().min(0).optional(),
+});
+
 // ─── CompletionJudgerConfig: timeout + retry for the LLM completion judgment step ───
 
 export interface CompletionJudgerConfig {
@@ -256,10 +265,14 @@ export async function verifyTask(
     timestamp: now,
   });
 
-  // Persist verification result
+  // Persist verification result — include criteria fields from LLM review for failure context
   await deps.stateManager.writeRaw(
     `verification/${task.id}/verification-result.json`,
-    verificationResult
+    {
+      ...verificationResult,
+      criteria_met: effectiveL2.criteria_met,
+      criteria_total: effectiveL2.criteria_total,
+    }
   );
 
   return verificationResult;
@@ -275,8 +288,94 @@ export async function handleVerdict(
   task: Task,
   verificationResult: VerificationResult
 ): Promise<VerdictResult> {
+  // P0: Progress-verdict contradiction check (§4.1)
+  // If dimension values worsened but verdict is "pass", override to "partial"
+  // "Worsened" is threshold-type-aware: min-type expects increase, max-type expects decrease.
+  if (verificationResult.verdict === "pass" && verificationResult.dimension_updates?.length > 0) {
+    // Load goal dimensions to determine threshold type per dimension
+    const goalRawForGuard = await deps.stateManager.readRaw(`goals/${task.goal_id}/goal.json`);
+    const goalDimsForGuard = (
+      goalRawForGuard &&
+      typeof goalRawForGuard === "object" &&
+      Array.isArray((goalRawForGuard as Record<string, unknown>).dimensions)
+        ? (goalRawForGuard as Record<string, unknown>).dimensions as Array<Record<string, unknown>>
+        : []
+    );
+
+    const anyWorsened = verificationResult.dimension_updates.some((u) => {
+      const prev = typeof u.previous_value === "number" ? u.previous_value : null;
+      const next = typeof u.new_value === "number" ? u.new_value : null;
+      if (prev === null || next === null) return false;
+
+      // Determine threshold type for this dimension
+      const dimMeta = goalDimsForGuard.find((d) => d.name === u.dimension_name);
+      const thresholdType =
+        dimMeta && typeof dimMeta.threshold === "object" && dimMeta.threshold !== null
+          ? (dimMeta.threshold as Record<string, unknown>).type as string | undefined
+          : undefined;
+
+      // For min-type: lower value is worse (decrease = worsened)
+      // For max-type: higher value is worse (increase = worsened)
+      // For range/present/match or unknown: skip (can't determine direction safely)
+      if (thresholdType === "min") {
+        return next < prev - 0.05;
+      } else if (thresholdType === "max") {
+        return next > prev + 0.05;
+      }
+      return false;
+    });
+    if (anyWorsened) {
+      deps.logger?.warn(
+        "progress-verdict contradiction: dimension value moved away from target but verdict was pass. Overriding to partial."
+      );
+      verificationResult = { ...verificationResult, verdict: "partial" };
+    }
+  }
+
+  // Save failure context for fail/partial verdicts (§4.7)
+  if (verificationResult.verdict === "fail" || verificationResult.verdict === "partial") {
+    const firstEvidence = verificationResult.evidence?.[0];
+    const reasoning = typeof firstEvidence?.description === "string" ? firstEvidence.description : "";
+    // Read criteria_met/criteria_total from the persisted verification result (written by verifyTask)
+    let criteria_met: number | undefined;
+    let criteria_total: number | undefined;
+    try {
+      const raw = await deps.stateManager.readRaw(`verification/${task.id}/verification-result.json`) as Record<string, unknown> | null;
+      if (raw && typeof raw.criteria_met === "number") criteria_met = raw.criteria_met;
+      if (raw && typeof raw.criteria_total === "number") criteria_total = raw.criteria_total;
+    } catch {
+      // Non-fatal: criteria fields are best-effort
+    }
+    const failureContext = {
+      prev_task_description: task.work_description,
+      verdict: verificationResult.verdict,
+      reasoning,
+      criteria_met,
+      criteria_total,
+      timestamp: new Date().toISOString(),
+    };
+    try {
+      await deps.stateManager.writeRaw(
+        `tasks/${task.goal_id}/last-failure-context.json`,
+        failureContext
+      );
+    } catch {
+      // Non-fatal: failure context saving is best-effort
+    }
+  }
+
   switch (verificationResult.verdict) {
     case "pass": {
+      // Clear stale failure context (pass means previous failures are no longer relevant)
+      try {
+        await deps.stateManager.writeRaw(
+          `tasks/${task.goal_id}/last-failure-context.json`,
+          null
+        );
+      } catch {
+        // Non-fatal: clearing failure context is best-effort
+      }
+
       // Record success
       deps.trustManager.recordSuccess(task.task_category);
 
@@ -306,7 +405,8 @@ export async function handleVerdict(
               (u) => u.dimension_name === dim.name
             );
             if (update !== undefined && typeof update.new_value === "number") {
-              dim.current_value = update.new_value;
+              const prev = typeof dim.current_value === "number" ? dim.current_value : 0;
+              dim.current_value = clampDimensionUpdate(prev, update.new_value, deps.logger, String(dim.name));
             }
             // Update last_updated for the primary dimension
             if (dim.name === task.primary_dimension) {
@@ -342,7 +442,8 @@ export async function handleVerdict(
                 (u) => u.dimension_name === dim.name
               );
               if (update !== undefined && typeof update.new_value === "number") {
-                dim.current_value = update.new_value;
+                const prev = typeof dim.current_value === "number" ? dim.current_value : 0;
+                dim.current_value = clampDimensionUpdate(prev, update.new_value, deps.logger, String(dim.name));
               }
             }
             await deps.stateManager.writeRaw(`goals/${task.goal_id}/goal.json`, goal);
@@ -566,7 +667,7 @@ async function runLLMReview(
   deps: VerifierDeps,
   task: Task,
   executionResult: AgentResult
-): Promise<{ passed: boolean; partial: boolean; description: string; confidence: number }> {
+): Promise<{ passed: boolean; partial: boolean; description: string; confidence: number; criteria_met?: number; criteria_total?: number }> {
   const timeoutMs = deps.completionJudgerConfig?.timeoutMs ?? 30_000;
   const maxRetries = deps.completionJudgerConfig?.maxRetries ?? 2;
   const retryBackoffMs = deps.completionJudgerConfig?.retryBackoffMs ?? 1_000;
@@ -639,19 +740,32 @@ Return JSON:
   }
 
   try {
-    const parsed = JSON.parse(
-      response.content.replace(/```json\n?/g, "").replace(/```/g, "").trim()
-    );
-    const verdictStr = parsed.verdict ?? "fail";
+    const rawJson = response.content.replace(/```json\n?/g, "").replace(/```/g, "").trim();
+    const parseResult = CompletionJudgerResponseSchema.safeParse(JSON.parse(rawJson));
+    if (!parseResult.success) {
+      deps.logger?.warn(`[completion_judger] Zod parse failed for task ${task.id}: ${parseResult.error.message}`);
+      await deps.sessionManager.endSession(reviewSession.id, "Failed to parse LLM review result");
+      return {
+        passed: false,
+        partial: false,
+        description: "Failed to parse LLM review result",
+        confidence: 0.3,
+      };
+    }
+    const parsed = parseResult.data;
+    const verdictStr = parsed.verdict;
     const result = {
       passed: verdictStr === "pass",
       partial: verdictStr === "partial",
-      description: parsed.reasoning ?? "LLM review completed",
+      description: parsed.reasoning || "LLM review completed",
       confidence: verdictStr === "pass" ? 0.8 : verdictStr === "partial" ? 0.6 : 0.8,
+      criteria_met: parsed.criteria_met,
+      criteria_total: parsed.criteria_total,
     };
     await deps.sessionManager.endSession(reviewSession.id, `LLM review: ${verdictStr}`);
     return result;
   } catch {
+    deps.logger?.warn(`[completion_judger] JSON.parse failed for task ${task.id}`);
     await deps.sessionManager.endSession(reviewSession.id, "Failed to parse LLM review result");
     return {
       passed: false,
@@ -763,4 +877,30 @@ async function appendTaskHistory(deps: VerifierDeps, goalId: string, task: Task)
     estimated_duration_ms,
   });
   await deps.stateManager.writeRaw(historyPath, history);
+}
+
+// ─── P0 Guard 1: dimension_updates change magnitude limit (§3.2) ───
+
+/**
+ * Clamp a proposed dimension update to within ±30% absolute or ±30% relative
+ * of the current value (whichever is larger). Logs a warning when clamping occurs.
+ *
+ * Exported for unit testing.
+ */
+export function clampDimensionUpdate(
+  current: number,
+  proposed: number,
+  logger?: Logger,
+  dimName?: string
+): number {
+  const absLimit = 0.3;
+  const relLimit = Math.abs(current) * 0.3;
+  const maxDelta = Math.max(absLimit, relLimit);
+  const clamped = Math.max(current - maxDelta, Math.min(current + maxDelta, proposed));
+  if (clamped !== proposed) {
+    logger?.warn(
+      `dimension_update clamped: dim=${dimName}, proposed=${proposed}, applied=${clamped}, current=${current}`
+    );
+  }
+  return clamped;
 }

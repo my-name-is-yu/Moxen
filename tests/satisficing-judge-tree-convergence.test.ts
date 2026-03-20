@@ -45,7 +45,9 @@ describe("judgeTreeCompletion: converged_satisficed propagation", () => {
     // Provide convergenceStatuses marking "leaf-1:dim1" as converged_satisficed
     const convergenceStatuses = makeConvergenceMap([["leaf-1:dim1", "converged_satisficed"]]);
 
-    const result = await judge.judgeTreeCompletion("leaf-1", convergenceStatuses);
+    // Two calls required: double-confirmation guard applies even for converged_satisficed.
+    await judge.judgeTreeCompletion("leaf-1", convergenceStatuses);  // first cycle: streak=1
+    const result = await judge.judgeTreeCompletion("leaf-1", convergenceStatuses);  // second cycle: confirmed
 
     expect(result.is_complete).toBe(true);
     expect(result.blocking_dimensions).toHaveLength(0);

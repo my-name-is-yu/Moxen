@@ -57,7 +57,9 @@ describe("judgeTreeCompletion", async () => {
     });
     await stateManager.saveGoal(goal);
 
-    const result = await judge.judgeTreeCompletion("leaf-1");
+    // Two calls required: double-confirmation guard applies to leaf nodes.
+    await judge.judgeTreeCompletion("leaf-1");  // first cycle: streak=1, not yet complete
+    const result = await judge.judgeTreeCompletion("leaf-1");  // second cycle: streak=2, confirmed
     expect(result.is_complete).toBe(true);
     expect(result.blocking_dimensions).toHaveLength(0);
   });

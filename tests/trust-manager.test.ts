@@ -104,10 +104,10 @@ describe("TrustManager", () => {
 
   describe("clamping", () => {
     it("clamps balance at +100 on repeated successes", async () => {
-      // Need to reach above 100: 34 * 3 = 102 > 100
-      for (let i = 0; i < 34; i++) {
-        await manager.recordSuccess("clamped-high");
-      }
+      // Use setOverride to bypass rate limit and verify clamping at +100
+      // (Rate limit allows only 3 success calls per hour; clamping is verified via override)
+      await manager.setOverride("clamped-high", 99, "test setup");
+      await manager.recordSuccess("clamped-high"); // 99 + 3 = 102, clamped to 100
       const balance = await manager.getBalance("clamped-high");
       expect(balance.balance).toBe(100);
     });
@@ -122,9 +122,9 @@ describe("TrustManager", () => {
     });
 
     it("stays at +100 after additional successes once clamped", async () => {
-      for (let i = 0; i < 40; i++) {
-        await manager.recordSuccess("max-domain");
-      }
+      // Use setOverride to set balance at 100, then verify a success call keeps it clamped
+      // (Rate limit allows only 3 success calls per hour)
+      await manager.setOverride("max-domain", 100, "test setup");
       const before = (await manager.getBalance("max-domain")).balance;
       await manager.recordSuccess("max-domain");
       const after = (await manager.getBalance("max-domain")).balance;
@@ -148,13 +148,15 @@ describe("TrustManager", () => {
 
   describe("mixed success/failure sequences", () => {
     it("recovers from failures with successes", async () => {
+      // Rate limit allows 3 success calls per hour; 4th is skipped
+      // So: -10 + 3 + 3 + 3 = -1 (4th success is rate-limited)
       await manager.recordFailure("mixed"); // -10
       await manager.recordSuccess("mixed"); // -7
       await manager.recordSuccess("mixed"); // -4
-      await manager.recordSuccess("mixed"); // -1
-      await manager.recordSuccess("mixed"); // +2
+      await manager.recordSuccess("mixed"); // -1 (3rd success, within limit)
+      await manager.recordSuccess("mixed"); // rate-limited, no change → stays -1
       const balance = await manager.getBalance("mixed");
-      expect(balance.balance).toBe(-10 + 3 + 3 + 3 + 3); // 2
+      expect(balance.balance).toBe(-10 + 3 + 3 + 3); // -1
     });
 
     it("tracks independent domains separately", async () => {

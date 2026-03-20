@@ -146,20 +146,48 @@ export async function observeWithLLM(
 
   const parsed = llmClient.parseJSON(response.content, LLMObservationResponseSchema);
 
+  // P0: Score-evidence consistency check (§4.3)
+  // If no evidence (no context, no git diff), LLM score > 0.0 is unreliable
+  let score = parsed.score;
+  if (!hasContext && score > 0.0) {
+    logger?.warn(
+      `score overridden to 0.0 (no evidence available, LLM returned ${score})`
+    );
+    score = 0.0;
+  }
+
+  // §3.3: Observation score jump suppression (±0.4/cycle)
+  // When no mechanical source is available and the LLM score jumps more than 0.4
+  // from the previous score, suppress the change and lower confidence.
+  const MAX_SCORE_DELTA = 0.4;
+  let resolvedConfidence = !hasContext ? 0.1 : 0.70;
+  if (
+    typeof previousScore === "number" &&
+    previousScore !== null &&
+    Math.abs(score - previousScore) > MAX_SCORE_DELTA
+  ) {
+    const delta = Math.abs(score - previousScore);
+    logger?.warn(
+      `WARN: observation score jump suppressed: prev=${previousScore.toFixed(3)}, proposed=${score.toFixed(3)}, delta=${delta.toFixed(3)}`
+    );
+    score = previousScore;
+    resolvedConfidence = 0.3;
+  }
+
   logger?.info(
-    `[ObservationEngine] LLM observation result for "${dimensionLabel}": score=${parsed.score.toFixed(3)}`
+    `[ObservationEngine] LLM observation result for "${dimensionLabel}": score=${score.toFixed(3)}`
   );
 
   // Scale LLM 0-1 score to threshold's native scale for min/max types.
   // LLM returns 0.0-1.0 (normalized), but gap-calculator expects the raw
   // value in the threshold's scale (e.g., min:5 expects value >= 5).
-  let extractedValue: number = parsed.score;
+  let extractedValue: number = score;
   try {
     const threshold = JSON.parse(thresholdDescription);
     if (threshold.type === "min" && typeof threshold.value === "number" && threshold.value > 1) {
-      extractedValue = parsed.score * threshold.value;
+      extractedValue = score * threshold.value;
     } else if (threshold.type === "max" && typeof threshold.value === "number" && threshold.value > 1) {
-      extractedValue = parsed.score * threshold.value;
+      extractedValue = score * threshold.value;
     }
   } catch { /* keep original score if threshold parsing fails */ }
 
@@ -177,9 +205,9 @@ export async function observeWithLLM(
       endpoint: null,
       confidence_tier: "independent_review",
     },
-    raw_result: { score: parsed.score, reason: parsed.reason },
+    raw_result: { score, reason: parsed.reason },
     extracted_value: extractedValue,
-    confidence: 0.70,
+    confidence: resolvedConfidence,
     notes: `LLM evaluation: ${parsed.reason}`,
   });
 

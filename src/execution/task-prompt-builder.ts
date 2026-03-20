@@ -130,9 +130,26 @@ Constraints:
     ? `\n=== Current Workspace State ===\n${workspaceContext}\n`
     : "\n=== Current Workspace State ===\nNo workspace context available.\n";
 
+  // §4.7 Inject last failure context if available
+  let failureContextSection = "";
+  try {
+    const failureCtx = await stateManager.readRaw(`tasks/${goalId}/last-failure-context.json`) as {
+      prev_task_description?: string;
+      verdict?: string;
+      reasoning?: string;
+      criteria_met?: number;
+      criteria_total?: number;
+    } | null;
+    if (failureCtx && failureCtx.prev_task_description) {
+      failureContextSection = `\n前回のタスク「${failureCtx.prev_task_description}」は以下の理由で${failureCtx.verdict ?? "failed"}と判定された:\n${failureCtx.reasoning ?? ""}\n達成基準: ${failureCtx.criteria_met ?? 0}/${failureCtx.criteria_total ?? 0}\nこの失敗を踏まえて、異なるアプローチのタスクを生成すること。\n`;
+    }
+  } catch {
+    // no failure context — skip injection
+  }
+
   return `${goalSection}
 ${dimensionSection}
-${repoSection}${adapterSection}${knowledgeSection}${workspaceSection}${existingTasksSection}
+${repoSection}${adapterSection}${knowledgeSection}${workspaceSection}${existingTasksSection}${failureContextSection}
 Requirements:
 - Specific to actual project (goal, description, repo context)
 - No generic improvements unless in goal description

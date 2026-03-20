@@ -99,6 +99,84 @@ function buildPipeline(complexity: "small" | "medium" | "large"): TaskPipeline |
   };
 }
 
+// ─── trigramSimilarity ───
+
+/**
+ * Compute Jaccard similarity between character trigram sets of two strings.
+ * Returns a value in [0, 1]. Higher means more similar.
+ */
+export function trigramSimilarity(a: string, b: string): number {
+  const trigrams = (s: string): Set<string> => {
+    const set = new Set<string>();
+    const norm = s.toLowerCase();
+    for (let i = 0; i <= norm.length - 3; i++) {
+      set.add(norm.slice(i, i + 3));
+    }
+    return set;
+  };
+
+  const ta = trigrams(a);
+  const tb = trigrams(b);
+
+  if (ta.size === 0 && tb.size === 0) return 1;
+  if (ta.size === 0 || tb.size === 0) return 0;
+
+  let intersection = 0;
+  for (const t of ta) {
+    if (tb.has(t)) intersection++;
+  }
+
+  const union = ta.size + tb.size - intersection;
+  return intersection / union;
+}
+
+// ─── Task history entry (minimal shape needed for duplicate check) ───
+
+interface TaskHistoryEntry {
+  id: string;
+  work_description: string;
+  status: string;
+}
+
+// ─── checkDuplicateTask ───
+
+/**
+ * Check whether `description` is too similar to a recently completed/failed task.
+ *
+ * Reads `tasks/${goalId}/task-history.json`, takes last 10 entries, and returns
+ * the matching entry if trigram similarity >= 0.7. Returns null if no duplicate.
+ */
+async function checkDuplicateTask(
+  stateManager: StateManager,
+  goalId: string,
+  description: string,
+  logger?: Logger
+): Promise<TaskHistoryEntry | null> {
+  let history: TaskHistoryEntry[] = [];
+  try {
+    const raw = await stateManager.readRaw(`tasks/${goalId}/task-history.json`);
+    if (Array.isArray(raw)) {
+      history = raw as TaskHistoryEntry[];
+    }
+  } catch {
+    // no history yet — not an error
+    return null;
+  }
+
+  const recent = history.slice(-10);
+  for (const entry of recent) {
+    if (entry.status !== "completed" && entry.status !== "failed") continue;
+    const sim = trigramSimilarity(description, entry.work_description ?? "");
+    if (sim >= 0.7) {
+      logger?.warn(
+        `WARN: duplicate task rejected: similar to recently ${entry.status} task "${entry.id}"`
+      );
+      return entry;
+    }
+  }
+  return null;
+}
+
 // ─── generateTask ───
 
 /**
@@ -108,7 +186,7 @@ function buildPipeline(complexity: "small" | "medium" | "large"): TaskPipeline |
  * @param goalId - the goal this task belongs to
  * @param targetDimension - the dimension this task should improve
  * @param strategyId - optional override; if not provided, uses active strategy
- * @returns the generated and persisted Task
+ * @returns the generated and persisted Task, or null if duplicate detected
  */
 export async function generateTask(
   deps: TaskGenerationDeps,
@@ -119,7 +197,7 @@ export async function generateTask(
   adapterType?: string,
   existingTasks?: string[],
   workspaceContext?: string
-): Promise<Task> {
+): Promise<Task | null> {
   const prompt = await buildTaskGenerationPrompt(
     deps.stateManager,
     goalId,
@@ -148,6 +226,17 @@ export async function generateTask(
       { rawResponse: response.content.substring(0, 500) }
     );
     throw err;
+  }
+
+  // §4.2 Duplicate task guard — reject if too similar to a recent completed/failed task
+  const duplicate = await checkDuplicateTask(
+    deps.stateManager,
+    goalId,
+    generated.work_description,
+    deps.logger
+  );
+  if (duplicate !== null) {
+    return null;
   }
 
   // Resolve strategy_id

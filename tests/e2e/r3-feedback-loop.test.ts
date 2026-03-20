@@ -308,8 +308,9 @@ describe("R3-1: verifyTask dimension_updates are applied to goal state via handl
 
     const qualityDim = updatedGoal.dimensions.find((d) => d.name === "quality");
     expect(qualityDim).toBeDefined();
-    // dimension_updates new_value=0.7 should be reflected
-    expect(qualityDim!.current_value).toBeCloseTo(0.7, 5);
+    // dimension_updates new_value=0.7 is clamped by Guard 1 (max delta ±0.3):
+    // current=0.3, proposed=0.7, delta=0.4 → clamped to 0.3+0.3=0.6
+    expect(qualityDim!.current_value).toBeCloseTo(0.6, 5);
   });
 
   it("pass verdict: dimension value is capped at 1.0 when delta would exceed it", async () => {

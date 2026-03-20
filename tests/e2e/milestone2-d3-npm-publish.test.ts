@@ -227,6 +227,8 @@ describe("Milestone 2 D-3: npm publish preparation goal", () => {
     const goal = makeNpmPublishGoal("goal-d3-complete", true /* allMet */);
     await stateManager.saveGoal(goal);
 
+    // Double-confirm guard: requires 2 consecutive cycles
+    judge.isGoalComplete(goal);
     const judgment = judge.isGoalComplete(goal);
 
     expect(judgment.is_complete).toBe(true);

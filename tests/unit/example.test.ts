@@ -264,6 +264,8 @@ describe("example unit coverage", () => {
         confidence: 0.95,
       }),
     ]);
+    // Double-confirm guard: requires 2 consecutive cycles
+    judge.isGoalComplete(completeGoal);
     expect(judge.isGoalComplete(completeGoal)).toMatchObject({
       is_complete: true,
       blocking_dimensions: [],

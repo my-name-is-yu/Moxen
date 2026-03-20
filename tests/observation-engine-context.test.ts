@@ -212,7 +212,7 @@ describe("ObservationEngine contextProvider integration", () => {
     expect(capturedPrompt).toContain(workspaceContextText);
   });
 
-  it("previous score is included in prompt when dimension has a current_value", async () => {
+  it("previous score is included in prompt when dimension has observation history", async () => {
     const contextProvider = vi.fn().mockResolvedValue("");
 
     let capturedPrompt: string | undefined;
@@ -240,7 +240,7 @@ describe("ObservationEngine contextProvider integration", () => {
           confidence: 0.5,
           observation_method: defaultMethod,
           last_updated: now,
-          history: [],
+          history: [{ value: 0.63, timestamp: now, confidence: 0.5, source_observation_id: "obs-seed-1" }],
           weight: 1.0,
           uncertainty_weight: null,
           state_integrity: "ok",

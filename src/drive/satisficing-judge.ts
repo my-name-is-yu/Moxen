@@ -50,6 +50,10 @@ export class SatisficingJudge {
   // Ring buffers keyed by goalId+dimensionName to track recent gap values
   private readonly gapHistory: Map<string, number[]> = new Map();
 
+  // P0: Satisficing double-confirmation guard (§4.4)
+  // Tracks consecutive cycles where all dimensions are met, keyed by goalId
+  private readonly satisficingStreak: Map<string, number> = new Map();
+
   constructor(
     stateManager: StateManager,
     embeddingClient?: IEmbeddingClient,  // Phase 2: for dimension mapping proposals
@@ -320,8 +324,20 @@ export class SatisficingJudge {
       (s) => s.is_satisfied && s.confidence < 0.85
     );
 
-    const isComplete =
-      blockingDimensions.length === 0 && lowConfidenceDimensions.length === 0;
+    // P0: Satisficing double-confirmation guard (§4.4)
+    // Require 2 consecutive cycles of gap <= threshold before declaring complete
+    const allDimensionsMet = blockingDimensions.length === 0 && lowConfidenceDimensions.length === 0;
+    let isComplete = false;
+    if (allDimensionsMet) {
+      const streak = (this.satisficingStreak.get(goal.id) ?? 0) + 1;
+      this.satisficingStreak.set(goal.id, streak);
+      if (streak >= 2) {
+        isComplete = true;
+        this.satisficingStreak.delete(goal.id);  // Reset after confirmed completion
+      }
+    } else {
+      this.satisficingStreak.set(goal.id, 0);  // Reset streak
+    }
 
     if (this.onSatisficingJudgment) {
       const satisfiedDims = satisfactions
@@ -502,6 +518,9 @@ export class SatisficingJudge {
     rootId: string,
     convergenceStatuses?: Map<string, SatisficingStatus>
   ): Promise<CompletionJudgment> {
+    // judgeTreeCompletion advances the streak by one per call (same as flat goals).
+    // Callers (e.g. CoreLoop) must invoke this across two separate cycles for the
+    // double-confirmation guard to confirm completion — matching flat-goal behaviour.
     return await judgeTreeCompletionFn(
       rootId,
       this.stateManager,

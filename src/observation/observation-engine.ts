@@ -300,6 +300,10 @@ export class ObservationEngine {
       if (this.llmClient) {
         const ctx = await fetchWorkspaceContext(goalId, dim.name);
         try {
+          // Only pass previousScore when there's actual observation history.
+          // The seed current_value in a new goal is not a real observation and
+          // should not trigger the §3.3 score-jump suppression guard.
+          const hasPriorObs = Array.isArray(dim.history) && dim.history.length > 0;
           await this.observeWithLLM(
             goalId,
             dim.name,
@@ -307,7 +311,7 @@ export class ObservationEngine {
             dim.label ?? dim.name,
             JSON.stringify(dim.threshold),
             ctx,
-            typeof dim.current_value === "number" ? dim.current_value : null
+            hasPriorObs && typeof dim.current_value === "number" ? dim.current_value : null
           );
           continue;
         } catch (err) {

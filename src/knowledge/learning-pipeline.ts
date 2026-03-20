@@ -10,6 +10,7 @@ import {
   FeedbackEntrySchema,
   FeedbackTargetStepEnum,
   LearningPipelineConfigSchema,
+  LearnedPatternTypeEnum,
 } from "../types/learning.js";
 import type {
   LearningTrigger,

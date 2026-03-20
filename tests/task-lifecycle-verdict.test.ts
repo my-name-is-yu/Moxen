@@ -442,8 +442,9 @@ describe("TaskLifecycle", async () => {
       const dims = goal.dimensions as Array<Record<string, unknown>>;
       const coverageDim = dims.find((d) => d.name === "coverage");
 
-      // current_value must now reflect the new_value from dimension_updates
-      expect(coverageDim!.current_value).toBe(0.7);
+      // current_value reflects new_value clamped by Guard 1 (max delta ±0.3):
+      // current=0.3, proposed=0.7, delta=0.4 → clamped to 0.3+0.3=0.6
+      expect(coverageDim!.current_value).toBeCloseTo(0.6, 10);
     });
 
     it("pass verdict does not change current_value when dimension_updates has no numeric new_value", async () => {

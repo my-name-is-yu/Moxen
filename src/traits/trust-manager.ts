@@ -41,6 +41,11 @@ function clamp(value: number): number {
   return Math.max(-100, Math.min(100, value));
 }
 
+/** Maximum success calls allowed within 1-hour sliding window before rate limiting */
+const TRUST_RATE_LIMIT_MAX = 3;
+/** Sliding window duration in milliseconds (1 hour) */
+const TRUST_RATE_LIMIT_WINDOW_MS = 3_600_000;
+
 /**
  * TrustManager handles per-domain trust balances, action quadrant determination,
  * irreversibility-based approval requirements, and user overrides.
@@ -52,6 +57,8 @@ function clamp(value: number): number {
 export class TrustManager {
   private readonly stateManager: StateManager;
   private cache: TrustStore | null = null;
+  /** In-memory sliding window of success call timestamps per domain */
+  private successTimestamps: Map<string, number[]> = new Map();
 
   constructor(stateManager: StateManager) {
     this.stateManager = stateManager;
@@ -96,8 +103,33 @@ export class TrustManager {
   /**
    * Record a successful task for a domain.
    * Adds TRUST_SUCCESS_DELTA (+3), clamps to [-100, +100], and persists.
+   *
+   * Rate limit: if 3+ success calls occurred in the last 1 hour for this domain,
+   * the delta is skipped (but the current balance is still returned).
    */
   async recordSuccess(domain: string): Promise<TrustBalance> {
+    const now = Date.now();
+    const windowStart = now - TRUST_RATE_LIMIT_WINDOW_MS;
+
+    // Filter timestamps to the current sliding window
+    const timestamps = (this.successTimestamps.get(domain) ?? []).filter(
+      (ts) => ts >= windowStart
+    );
+
+    if (timestamps.length >= TRUST_RATE_LIMIT_MAX) {
+      console.warn(
+        `WARN: trust rate limit triggered (domain: ${domain}, window: 1h, count: ${timestamps.length})`
+      );
+      // Store the cleaned-up timestamps and return without applying delta
+      this.successTimestamps.set(domain, timestamps);
+      const store = await this.loadStore();
+      return store.balances[domain] ?? defaultBalance(domain);
+    }
+
+    // Record this call and apply the delta
+    timestamps.push(now);
+    this.successTimestamps.set(domain, timestamps);
+
     const store = await this.loadStore();
     const current = store.balances[domain] ?? defaultBalance(domain);
     const updated = TrustBalanceSchema.parse({

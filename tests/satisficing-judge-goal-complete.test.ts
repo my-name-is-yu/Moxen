@@ -51,7 +51,7 @@ afterEach(() => {
 // ─── isGoalComplete ───
 
 describe("isGoalComplete", () => {
-  it("all dimensions satisfied with high confidence → complete", () => {
+  it("all dimensions satisfied with high confidence → complete (requires 2 consecutive cycles)", () => {
     const goal = makeGoal({
       dimensions: [
         makeDimension({
@@ -68,6 +68,10 @@ describe("isGoalComplete", () => {
         }),
       ],
     });
+    // First cycle: not yet complete (streak = 1)
+    const first = judge.isGoalComplete(goal);
+    expect(first.is_complete).toBe(false);
+    // Second cycle: complete (streak = 2)
     const result = judge.isGoalComplete(goal);
     expect(result.is_complete).toBe(true);
     expect(result.blocking_dimensions).toHaveLength(0);
@@ -147,6 +151,9 @@ describe("isGoalComplete", () => {
         }),
       ],
     });
+    // First cycle: not yet complete
+    judge.isGoalComplete(goal);
+    // Second cycle: complete, no verification needed
     const result = judge.isGoalComplete(goal);
     expect(result.is_complete).toBe(true);
     expect(result.needs_verification_task).toBe(false);
@@ -186,8 +193,11 @@ describe("isGoalComplete", () => {
     expect(withoutConvergence.is_complete).toBe(false);
     expect(withoutConvergence.blocking_dimensions).toContain("test_dim");
 
-    // With converged_satisficed status → complete
+    // With converged_satisficed status → complete after 2 consecutive cycles
     const convergenceStatuses = new Map([["goal-cs-1:test_dim", "converged_satisficed" as const]]);
+    // First cycle with converged status: streak = 1, not yet complete
+    judge.isGoalComplete(goal, convergenceStatuses);
+    // Second cycle: complete
     const withConvergence = judge.isGoalComplete(goal, convergenceStatuses);
     expect(withConvergence.is_complete).toBe(true);
     expect(withConvergence.blocking_dimensions).toHaveLength(0);
@@ -257,6 +267,9 @@ describe("isGoalComplete", () => {
       ],
     });
     const convergenceStatuses = new Map([["goal-cs-low-conf:test_dim", "converged_satisficed" as const]]);
+    // First cycle: streak = 1, not yet complete
+    judge.isGoalComplete(goal, convergenceStatuses);
+    // Second cycle: complete
     const result = judge.isGoalComplete(goal, convergenceStatuses);
     expect(result.is_complete).toBe(true);
     expect(result.blocking_dimensions).toHaveLength(0);

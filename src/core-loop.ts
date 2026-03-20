@@ -125,13 +125,72 @@ export class CoreLoop {
     }
     await this.deps.stateManager.saveGapHistory(goalId, []);
 
+    // Restore from checkpoint if present (§4.8).
+    // NOTE: this checkpoint (goals/<goalId>/checkpoint.json) is for loop recovery across
+    // process restarts — it saves cycle progress and dimension state so the loop can
+    // resume mid-run. It is distinct from CheckpointManager in
+    // src/execution/checkpoint-manager.ts, which handles multi-agent session transfer
+    // (passing state from one agent session to another).
+    let startLoopIndex = 0;
+    try {
+      const checkpoint = await this.deps.stateManager.readRaw(`goals/${goalId}/checkpoint.json`);
+      if (
+        checkpoint &&
+        typeof checkpoint === "object" &&
+        typeof (checkpoint as Record<string, unknown>).cycle_number === "number"
+      ) {
+        const cp = checkpoint as {
+          cycle_number: number;
+          last_verified_task_id?: string;
+          dimension_snapshot?: Record<string, number>;
+          trust_snapshot?: number;
+          timestamp?: string;
+        };
+        startLoopIndex = cp.cycle_number;
+        this.logger?.warn(
+          `Resuming from checkpoint (cycle ${cp.cycle_number}, task ${cp.last_verified_task_id ?? "unknown"})`
+        );
+        // Restore dimension values from snapshot
+        if (cp.dimension_snapshot && typeof cp.dimension_snapshot === "object") {
+          const goalData = await this.deps.stateManager.readRaw(`goals/${goalId}/goal.json`);
+          if (goalData && typeof goalData === "object") {
+            const goalObj = goalData as Record<string, unknown>;
+            const dims = goalObj.dimensions as Array<Record<string, unknown>> | undefined;
+            if (dims) {
+              for (const dim of dims) {
+                const snapshotVal = cp.dimension_snapshot[String(dim.name)];
+                if (typeof snapshotVal === "number") {
+                  dim.current_value = snapshotVal;
+                }
+              }
+              await this.deps.stateManager.writeRaw(`goals/${goalId}/goal.json`, goalObj);
+            }
+          }
+        }
+        // Restore trust balance for the adapter domain from snapshot
+        if (typeof cp.trust_snapshot === "number" && this.deps.trustManager) {
+          try {
+            await this.deps.trustManager.setOverride(
+              this.config.adapterType,
+              cp.trust_snapshot,
+              "checkpoint_restore"
+            );
+          } catch {
+            // Non-fatal — trust restore failure should not abort the run
+          }
+        }
+      }
+    } catch {
+      // Checkpoint restore failure is non-fatal — start from beginning
+    }
+
     const iterations: LoopIterationResult[] = [];
     let consecutiveErrors = 0;
     let consecutiveDenied = 0;
     let consecutiveEscalations = 0;
     let finalStatus: LoopResult["finalStatus"] = "max_iterations";
 
-    for (let loopIndex = 0; loopIndex < this.config.maxIterations; loopIndex++) {
+    for (let loopIndex = startLoopIndex; loopIndex < this.config.maxIterations; loopIndex++) {
       if (this.stopped) {
         finalStatus = "stopped";
         break;
@@ -141,6 +200,44 @@ export class CoreLoop {
         ? await this.runTreeIteration(goalId, loopIndex)
         : await this.runOneIteration(goalId, loopIndex);
       iterations.push(iterationResult);
+
+      // Save checkpoint after each successful verify step (§4.8)
+      if (iterationResult.error === null && iterationResult.taskResult !== null) {
+        try {
+          const currentGoalForCp = await this.deps.stateManager.readRaw(`goals/${goalId}/goal.json`);
+          const dimensionSnapshot: Record<string, number> = {};
+          if (currentGoalForCp && typeof currentGoalForCp === "object") {
+            const dims = (currentGoalForCp as Record<string, unknown>).dimensions as
+              | Array<Record<string, unknown>>
+              | undefined;
+            if (dims) {
+              for (const dim of dims) {
+                if (typeof dim.name === "string" && typeof dim.current_value === "number") {
+                  dimensionSnapshot[dim.name] = dim.current_value;
+                }
+              }
+            }
+          }
+          let trustSnapshot: number | undefined;
+          if (this.deps.trustManager) {
+            try {
+              const trustBalance = await this.deps.trustManager.getBalance(this.config.adapterType);
+              trustSnapshot = trustBalance.balance;
+            } catch {
+              // Non-fatal
+            }
+          }
+          await this.deps.stateManager.writeRaw(`goals/${goalId}/checkpoint.json`, {
+            cycle_number: loopIndex + 1,
+            last_verified_task_id: iterationResult.taskResult.task.id,
+            dimension_snapshot: dimensionSnapshot,
+            trust_snapshot: trustSnapshot,
+            timestamp: new Date().toISOString(),
+          });
+        } catch {
+          // Checkpoint save failure is non-fatal
+        }
+      }
 
       // Check completion (R1-2: must complete at least minIterations before exiting)
       if (iterationResult.completionJudgment.is_complete &&
