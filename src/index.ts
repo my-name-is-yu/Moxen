@@ -1,4 +1,5 @@
 export * from "./types/index.js";
+export { LLMError, AdapterError, ValidationError, StateError } from "./utils/errors.js";
 export { StateManager } from "./state-manager.js";
 export {
   computeRawGap,

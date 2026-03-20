@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import type { ZodSchema } from "zod";
 import { sleep } from "../utils/sleep.js";
 import { BaseLLMClient, DEFAULT_MAX_TOKENS, extractJSON } from "./base-llm-client.js";
+import { LLMError } from "../utils/errors.js";
 
 // ─── Inline Types ───
 
@@ -62,7 +63,7 @@ export class LLMClient extends BaseLLMClient implements ILLMClient {
   constructor(apiKey: string) {
     super();
     if (!apiKey) {
-      throw new Error(
+      throw new LLMError(
         "LLMClient: no API key provided. Pass apiKey to constructor."
       );
     }

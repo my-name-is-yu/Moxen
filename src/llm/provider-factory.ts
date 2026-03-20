@@ -4,6 +4,7 @@
 // Used by both CLIRunner and TUI entry to avoid duplicating wiring logic.
 
 import { LLMClient, type ILLMClient } from "./llm-client.js";
+import { LLMError } from "../utils/errors.js";
 import { OllamaLLMClient } from "./ollama-client.js";
 import { OpenAILLMClient } from "./openai-client.js";
 import { CodexLLMClient } from "./codex-llm-client.js";
@@ -34,7 +35,7 @@ export async function buildLLMClient(): Promise<ILLMClient> {
   switch (config.llm_provider) {
     case "codex":
       if (!config.openai?.api_key) {
-        throw new Error(
+        throw new LLMError(
           "OPENAI_API_KEY is not set.\nSet it via: export OPENAI_API_KEY=sk-..."
         );
       }
@@ -45,7 +46,7 @@ export async function buildLLMClient(): Promise<ILLMClient> {
 
     case "openai":
       if (!config.openai?.api_key) {
-        throw new Error(
+        throw new LLMError(
           "OPENAI_API_KEY is not set.\nSet it via: export OPENAI_API_KEY=sk-..."
         );
       }
@@ -63,7 +64,7 @@ export async function buildLLMClient(): Promise<ILLMClient> {
 
     case "anthropic":
       if (!config.anthropic?.api_key) {
-        throw new Error(
+        throw new LLMError(
           "ANTHROPIC_API_KEY is not set.\nSet it via: export ANTHROPIC_API_KEY=sk-ant-..."
         );
       }
@@ -72,7 +73,7 @@ export async function buildLLMClient(): Promise<ILLMClient> {
     default:
       // Unknown or unset value falls back to OpenAI
       if (!config.openai?.api_key) {
-        throw new Error(
+        throw new LLMError(
           "OPENAI_API_KEY is not set.\nSet it via: export OPENAI_API_KEY=sk-..."
         );
       }

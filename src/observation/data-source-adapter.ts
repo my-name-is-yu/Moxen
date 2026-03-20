@@ -5,6 +5,7 @@
 // multiple adapter instances.
 
 import * as fsp from "node:fs/promises";
+import { ValidationError } from "../utils/errors.js";
 import type {
   DataSourceType,
   DataSourceConfig,
@@ -54,7 +55,7 @@ export class FileDataSourceAdapter implements IDataSourceAdapter {
   async connect(): Promise<void> {
     const path = this.config.connection.path;
     if (!path) {
-      throw new Error(`FileDataSourceAdapter [${this.sourceId}]: connection.path is required`);
+      throw new ValidationError(`FileDataSourceAdapter [${this.sourceId}]: connection.path is required`);
     }
     try { await fsp.access(path); } catch {
       throw new Error(`FileDataSourceAdapter [${this.sourceId}]: file not found: ${path}`);
@@ -64,7 +65,7 @@ export class FileDataSourceAdapter implements IDataSourceAdapter {
   async query(params: DataSourceQuery): Promise<DataSourceResult> {
     const path = this.config.connection.path;
     if (!path) {
-      throw new Error(`FileDataSourceAdapter [${this.sourceId}]: connection.path is required`);
+      throw new ValidationError(`FileDataSourceAdapter [${this.sourceId}]: connection.path is required`);
     }
 
     let raw: unknown;
@@ -150,7 +151,7 @@ export class HttpApiDataSourceAdapter implements IDataSourceAdapter {
   async query(params: DataSourceQuery): Promise<DataSourceResult> {
     const url = this.config.connection.url;
     if (!url) {
-      throw new Error(`HttpApiDataSourceAdapter [${this.sourceId}]: connection.url is required`);
+      throw new ValidationError(`HttpApiDataSourceAdapter [${this.sourceId}]: connection.url is required`);
     }
 
     const timeoutMs = params.timeout_ms ?? 10000;

@@ -1,4 +1,5 @@
 import { StateManager } from "../state-manager.js";
+import { StateError } from "../utils/errors.js";
 import { SatisficingJudge, aggregateValues } from "../drive/satisficing-judge.js";
 import { computeRawGap, normalizeGap } from "../drive/gap-calculator.js";
 import type { Goal, Dimension } from "../types/goal.js";
@@ -70,7 +71,7 @@ export class StateAggregator {
   async aggregateChildStates(parentId: string): Promise<AggregatedState> {
     const parent = await this.stateManager.loadGoal(parentId);
     if (parent === null) {
-      throw new Error(
+      throw new StateError(
         `StateAggregator.aggregateChildStates: parent goal "${parentId}" not found`
       );
     }
@@ -154,7 +155,7 @@ export class StateAggregator {
   async propagateStateDown(parentId: string): Promise<void> {
     const parent = await this.stateManager.loadGoal(parentId);
     if (parent === null) {
-      throw new Error(
+      throw new StateError(
         `StateAggregator.propagateStateDown: parent goal "${parentId}" not found`
       );
     }

@@ -5,6 +5,8 @@
 // This is the abstraction layer that isolates TaskLifecycle from
 // concrete agent implementations (Claude Code CLI, Claude API, etc.).
 
+import { AdapterError } from "../utils/errors.js";
+
 // ─── Types ───
 
 export interface AgentTask {
@@ -88,7 +90,7 @@ export class AdapterRegistry {
   getAdapter(type: string): IAdapter {
     const adapter = this.adapters.get(type);
     if (!adapter) {
-      throw new Error(
+      throw new AdapterError(
         `AdapterRegistry: no adapter registered for type "${type}". ` +
           `Available types: [${this.listAdapters().join(", ")}]`
       );

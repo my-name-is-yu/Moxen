@@ -1,6 +1,7 @@
 import { BaseLLMClient, DEFAULT_MAX_TOKENS } from "./base-llm-client.js";
 import { type ILLMClient, type LLMMessage, type LLMRequestOptions, type LLMResponse } from "./llm-client.js";
 import { sleep } from "../utils/sleep.js";
+import { LLMError } from "../utils/errors.js";
 
 // ─── Constants ───
 
@@ -80,7 +81,7 @@ export class OllamaLLMClient extends BaseLLMClient implements ILLMClient {
 
         if (!response.ok) {
           const errorText = await response.text().catch(() => "(no body)");
-          throw new Error(
+          throw new LLMError(
             `OllamaLLMClient: HTTP ${response.status} ${response.statusText} — ${errorText}`
           );
         }

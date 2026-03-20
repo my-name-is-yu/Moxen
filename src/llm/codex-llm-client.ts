@@ -10,6 +10,7 @@ import {
   type LLMResponse,
 } from "./llm-client.js";
 import { sleep } from "../utils/sleep.js";
+import { LLMError } from "../utils/errors.js";
 
 // ─── Constants ───
 
@@ -175,7 +176,7 @@ export class CodexLLMClient extends BaseLLMClient implements ILLMClient {
         _cleanupTmp(tmpDir, tmpFile).catch((cleanupErr) => {
           console.debug("CodexLLMClient: _cleanupTmp failed (non-critical)", String(cleanupErr));
         });
-        reject(new Error(`CodexLLMClient: spawn error — ${err.message}`));
+        reject(new LLMError(`CodexLLMClient: spawn error — ${err.message}`));
       });
 
       child.on("close", (code: number | null) => {
@@ -186,7 +187,7 @@ export class CodexLLMClient extends BaseLLMClient implements ILLMClient {
             console.debug("CodexLLMClient: _cleanupTmp failed (non-critical)", String(cleanupErr));
           });
           reject(
-            new Error(
+            new LLMError(
               `CodexLLMClient: timed out after ${this.timeoutMs}ms`
             )
           );
@@ -199,7 +200,7 @@ export class CodexLLMClient extends BaseLLMClient implements ILLMClient {
           });
           const detail = stderrData.trim() ? ` — ${stderrData.trim().slice(0, 500)}` : "";
           reject(
-            new Error(
+            new LLMError(
               `CodexLLMClient: process exited with code ${code}${detail}`
             )
           );
@@ -219,7 +220,7 @@ export class CodexLLMClient extends BaseLLMClient implements ILLMClient {
               console.debug("CodexLLMClient: _cleanupTmp failed (non-critical)", String(cleanupErr));
             });
             reject(
-              new Error(
+              new LLMError(
                 `CodexLLMClient: failed to read output file — ${String(readErr)}`
               )
             );

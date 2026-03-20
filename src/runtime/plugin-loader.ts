@@ -3,6 +3,7 @@ import * as fs from "node:fs/promises";
 import yaml from "js-yaml";
 import { getPluginsDir } from "../utils/paths.js";
 import { writeJsonFileAtomic } from "../utils/json-io.js";
+import { ValidationError } from "../utils/errors.js";
 import type { Logger } from "./logger.js";
 import {
   PluginManifestSchema,
@@ -81,7 +82,7 @@ export class PluginLoader {
     // 2. Dynamically import the entry point
     const entryPath = path.resolve(pluginDir, manifest.entry_point);
     if (!entryPath.startsWith(pluginDir + path.sep) && entryPath !== pluginDir) {
-      throw new Error(`Plugin entry point escapes plugin directory: ${manifest.entry_point}`);
+      throw new ValidationError(`Plugin entry point escapes plugin directory: ${manifest.entry_point}`);
     }
     let module: { default?: unknown };
     try {
@@ -182,7 +183,7 @@ export class PluginLoader {
       const issues = result.error.issues
         .map((i) => `  ${i.path.join(".")}: ${i.message}`)
         .join("\n");
-      throw new Error(`Plugin manifest schema validation failed:\n${issues}`);
+      throw new ValidationError(`Plugin manifest schema validation failed:\n${issues}`);
     }
 
     return result.data;
@@ -201,7 +202,7 @@ export class PluginLoader {
     const required = requiredMethods[type];
     for (const method of required) {
       if (!(method in (impl as object))) {
-        throw new Error(
+        throw new ValidationError(
           `Plugin is missing required method "${method}" (type: ${type})`
         );
       }

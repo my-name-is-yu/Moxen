@@ -1,6 +1,7 @@
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { z } from "zod";
+import { ValidationError } from "../utils/errors.js";
 import type { ILLMClient } from "../llm/llm-client.js";
 import type { Logger } from "../runtime/logger.js";
 import type { IEmbeddingClient } from "../knowledge/embedding-client.js";
@@ -69,7 +70,7 @@ export class StrategyTemplateRegistry {
     goalId: string
   ): Promise<StrategyTemplate> {
     if (strategy.state !== "completed") {
-      throw new Error(
+      throw new ValidationError(
         `Cannot register template: strategy state is "${strategy.state}", expected "completed"`
       );
     }
@@ -77,7 +78,7 @@ export class StrategyTemplateRegistry {
       strategy.effectiveness_score === null ||
       strategy.effectiveness_score < 0.5
     ) {
-      throw new Error(
+      throw new ValidationError(
         `Cannot register template: effectiveness_score is ${strategy.effectiveness_score ?? "null"}, must be >= 0.5`
       );
     }

@@ -1,4 +1,5 @@
 import { SessionSchema, ContextSlotSchema } from "../types/session.js";
+import { AdapterError } from "../utils/errors.js";
 import type { Session, SessionType, ContextSlot } from "../types/session.js";
 import type { StateManager } from "../state-manager.js";
 import type { KnowledgeEntry } from "../types/knowledge.js";

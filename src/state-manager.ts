@@ -1,6 +1,7 @@
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import { getMotivaDirPath } from "./utils/paths.js";
+import { StateError } from "./utils/errors.js";
 import { writeJsonFileAtomic } from "./utils/json-io.js";
 import type { Logger } from "./runtime/logger.js";
 import { GoalSchema, GoalTreeSchema } from "./types/goal.js";
@@ -276,7 +277,7 @@ export class StateManager {
   async appendObservation(goalId: string, entry: ObservationLogEntry): Promise<void> {
     const parsed = ObservationLogEntrySchema.parse(entry);
     if (parsed.goal_id !== goalId) {
-      throw new Error(
+      throw new StateError(
         `appendObservation: entry.goal_id ("${parsed.goal_id}") does not match goalId ("${goalId}")`
       );
     }
@@ -411,7 +412,7 @@ export class StateManager {
   async savePaceSnapshot(goalId: string, snapshot: PaceSnapshot): Promise<void> {
     const goal = await this.loadGoal(goalId);
     if (!goal) {
-      throw new Error(`savePaceSnapshot: goal "${goalId}" not found`);
+      throw new StateError(`savePaceSnapshot: goal "${goalId}" not found`);
     }
     const updated: Goal = { ...goal, pace_snapshot: snapshot };
     await this.saveGoal(updated);
@@ -548,7 +549,7 @@ export class StateManager {
   async updateGoalInTree(goalId: string, updates: Partial<Goal>): Promise<void> {
     const existingGoal = await this.loadGoal(goalId);
     if (existingGoal === null) {
-      throw new Error(`updateGoalInTree: goal "${goalId}" not found`);
+      throw new StateError(`updateGoalInTree: goal "${goalId}" not found`);
     }
 
     const updatedGoal: Goal = {

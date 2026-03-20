@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ValidationError } from "../utils/errors.js";
 import type { StateManager } from "../state-manager.js";
 import type { ILLMClient, LLMMessage } from "../llm/llm-client.js";
 import type {
@@ -59,7 +60,7 @@ export class GoalDependencyGraph {
    */
   async addEdge(edge: Omit<DependencyEdge, "created_at">): Promise<DependencyEdge> {
     if (edge.type === "prerequisite" && this.detectCycle(edge.from_goal_id, edge.to_goal_id)) {
-      throw new Error(
+      throw new ValidationError(
         `Adding prerequisite ${edge.from_goal_id} → ${edge.to_goal_id} would create a cycle`
       );
     }

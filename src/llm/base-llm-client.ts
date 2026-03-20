@@ -1,4 +1,5 @@
 import type { ZodSchema } from "zod";
+import { LLMError } from "../utils/errors.js";
 
 // ─── Shared constant ───
 
@@ -40,13 +41,13 @@ export abstract class BaseLLMClient {
     try {
       raw = JSON.parse(jsonText);
     } catch (err) {
-      throw new Error(
+      throw new LLMError(
         `LLM response JSON parse failed — ${String(err)}\nContent: ${content}`
       );
     }
     const result = schema.safeParse(raw);
     if (!result.success) {
-      throw new Error(
+      throw new LLMError(
         `LLM response validation failed: ${result.error.issues.map((i) => i.message).join(", ")}. ` +
           `Raw: ${JSON.stringify(raw).slice(0, 200)}`
       );
