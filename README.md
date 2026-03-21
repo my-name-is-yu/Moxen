@@ -1,5 +1,9 @@
 # Motiva
 
+[![CI](https://github.com/my-name-is-yu/Motiva/actions/workflows/ci.yml/badge.svg)](https://github.com/my-name-is-yu/Motiva/actions/workflows/ci.yml)
+[![npm version](https://img.shields.io/npm/v/motiva.svg)](https://www.npmjs.com/package/motiva)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
 AI agent orchestrator that gives existing agents "motivation" — goal-driven task discovery, autonomous progress observation, and satisficing completion judgment.
 
 ---
@@ -13,6 +17,16 @@ The key distinction from existing tools: Motiva doesn't execute. It orchestrates
 Motiva is built on a **4-element model**: a Goal (with measurable thresholds), Current State (observed with confidence scores), the Gap between them, and Constraints that govern how tasks may be executed. The **core loop** — observe → gap → score → task → execute → verify — runs until the goal is satisfied or the system escalates to a human.
 
 Motiva knows when to stop. Rather than pursuing perfection, it applies *satisficing*: when all goal dimensions cross their thresholds with sufficient evidence, the goal is complete. No runaway loops. No premature completion on self-reported progress alone.
+
+---
+
+## Why Motiva?
+
+- **Execution boundary** — Motiva never executes. It orchestrates agents and verifies results. No runaway scripts, no side effects from the orchestrator itself.
+- **Goal-driven, not prompt-driven** — You set a long-term goal with measurable thresholds. Motiva autonomously decomposes, delegates, observes, and loops until satisfied.
+- **Satisficing** — Stops when "good enough," not when perfect. Prevents infinite loops and wasted compute on diminishing returns.
+- **Asymmetric trust** — Failure costs 3x more than success rewards. Irreversible actions always require human approval, regardless of track record.
+- **Agent-agnostic** — Works with any AI agent: Claude Code CLI, OpenAI Codex, Browser Use, or your own custom adapter. Swap agents without changing goals.
 
 ---
 
@@ -225,6 +239,21 @@ Exit codes: `0` normal completion, `1` error, `2` stall escalation requiring hum
 
 ---
 
+## Supported Adapters
+
+| Adapter | Type | Capabilities |
+|---------|------|-------------|
+| `claude_code_cli` | CLI | Code execution, file read/write, shell commands |
+| `openai_codex_cli` | CLI | Code execution, file read/write, shell commands |
+| `browser_use_cli` | CLI | Web browsing, scraping, form filling, screenshots |
+| `claude_api` | LLM API | Text generation, analysis, planning |
+| `github_issue` | REST API | Issue creation, search |
+| `a2a` | A2A Protocol | Remote agent delegation (configurable) |
+
+Custom adapters can be added as [plugins](docs/design/plugin-development-guide.md) in `~/.motiva/plugins/`.
+
+---
+
 ## Development
 
 ```bash
@@ -238,6 +267,22 @@ npm run test:watch      # Watch mode
 State files: `~/.motiva/`. Reports: `~/.motiva/reports/`. Ethics logs: `~/.motiva/ethics/`.
 
 For detailed implementation status, see [`docs/status.md`](docs/status.md).
+
+---
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to contribute.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for version history.
+
+---
+
+## Privacy
+
+Motiva stores all state locally in `~/.motiva/`. It sends prompts to your configured LLM provider (OpenAI/Anthropic) but collects no telemetry and phones home to no server.
 
 ---
 
