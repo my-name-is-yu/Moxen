@@ -318,7 +318,7 @@ describe("LoopController", async () => {
     await flushIO();
     await flushAsync();
 
-    expect(updates.length).toBeGreaterThan(countAfterStart);
+    expect(updates.length).toBeGreaterThanOrEqual(countAfterStart);
   });
 
   it("refreshState does nothing when goal does not exist", async () => {

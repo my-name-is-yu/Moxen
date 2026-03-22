@@ -82,7 +82,7 @@ export function App({
 
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
-      role: "motiva",
+      role: "conatus",
       text: "What would you like to do? Type '/help' for available commands.",
       timestamp: new Date(),
       messageType: "info",
@@ -172,7 +172,7 @@ export function App({
         setMessages((prev) => [
           ...prev,
           ...result.messages.map((text) => ({
-            role: "motiva" as const,
+            role: "conatus" as const,
             text,
             timestamp: new Date(),
             messageType: result.messageType ?? ("info" as const),
@@ -197,7 +197,7 @@ export function App({
         setMessages((prev) => [
           ...prev,
           {
-            role: "motiva" as const,
+            role: "conatus" as const,
             text: `Error: ${message}`,
             timestamp: new Date(),
             messageType: "error" as const,
@@ -227,7 +227,7 @@ export function App({
     <Box flexDirection="column" height={termRows}>
       {/* App header */}
       <Box>
-        <Text bold color="blue">[ MOTIVA ]</Text>
+        <Text bold color="blue">[ CONATUS ]</Text>
         {(cwd || gitBranch || providerName) && (
           <Text dimColor>
             {"  "}

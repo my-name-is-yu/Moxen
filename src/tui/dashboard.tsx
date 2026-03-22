@@ -88,7 +88,7 @@ export function Dashboard({ state }: DashboardProps) {
         paddingY={1}
       >
         <Text bold color="magenta">
-          🎯 MOTIVA
+          🎯 CONATUS
         </Text>
         <Text> </Text>
         <Text color="yellow">No active goals.</Text>
@@ -102,7 +102,7 @@ export function Dashboard({ state }: DashboardProps) {
           {"  2. Then type: "}
           <Text color="green">/run</Text>
         </Text>
-        <Text>{"  3. Motiva will decompose and execute automatically."}</Text>
+        <Text>{"  3. Conatus will decompose and execute automatically."}</Text>
         <Text> </Text>
         <Text dimColor>
           {"Type "}
@@ -120,7 +120,7 @@ export function Dashboard({ state }: DashboardProps) {
       {/* Header */}
       <Box>
         <Text bold color="magenta">
-          MOTIVA
+          CONATUS
         </Text>
         <Text>{"  goal: "}</Text>
         <Text bold>{goalLabel}</Text>

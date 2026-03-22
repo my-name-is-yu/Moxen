@@ -113,13 +113,13 @@ async function buildDeps() {
     stateManager, goalTreeManager, stateAggregator, satisficingJudge
   );
 
-  const motivaBaseDir = getMotivaDirPath();
+  const conatusBaseDir = getMotivaDirPath();
   let memoryLifecycleManager: MemoryLifecycleManager | undefined;
   let driveScoreAdapter: DriveScoreAdapter | undefined;
   try {
     driveScoreAdapter = new DriveScoreAdapter();
     memoryLifecycleManager = new MemoryLifecycleManager(
-      motivaBaseDir,
+      conatusBaseDir,
       llmClient,
       undefined,
       undefined,

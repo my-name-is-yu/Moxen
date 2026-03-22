@@ -65,7 +65,7 @@ export function HelpOverlay({ onDismiss }: HelpOverlayProps) {
           </Box>
           <Box>
             <Box width={20}><Text dimColor>{"<anything else>"}</Text></Box>
-            <Text>Chat with Motiva</Text>
+            <Text>Chat with Conatus</Text>
           </Box>
         </Box>
       </Box>
@@ -81,7 +81,7 @@ export function HelpOverlay({ onDismiss }: HelpOverlayProps) {
           </Box>
           <Box>
             <Box width={20}><Text color="cyan" bold>Ctrl-C</Text></Box>
-            <Text>Quit Motiva</Text>
+            <Text>Quit Conatus</Text>
           </Box>
         </Box>
       </Box>
