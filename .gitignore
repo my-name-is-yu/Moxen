@@ -2,7 +2,10 @@ node_modules/
 dist/
 coverage-c8/
 .motiva/
+.conatus/
 .claire/
+.claude/
+memory/
 *.tmp
 web/.next/
 web/node_modules/
