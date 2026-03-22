@@ -1,7 +1,7 @@
 {
   "name": "motiva",
   "version": "0.1.0",
-  "description": "AI agent orchestrator that gives existing agents motivation — goal-driven task selection, progress observation, and completion judgment",
+  "description": "AI agent orchestrator that gives existing agents motivation — set a goal, and Motiva observes, delegates, verifies, and loops until done.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -26,7 +26,13 @@
     "orchestrator",
     "motivation",
     "autonomous",
-    "llm"
+    "goal-driven",
+    "task-discovery",
+    "satisficing",
+    "llm",
+    "ai-agent",
+    "multi-agent",
+    "typescript"
   ],
   "repository": {
     "type": "git",
