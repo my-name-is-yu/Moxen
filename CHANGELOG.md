@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.1.2] - 2026-03-22
+
+### Fixed
+
+- TUI layout: resolve chat/dashboard overlap, border misalignment, and separator issues (#176)
+
+### Changed
+
+- TUI: hide dashboard sidebar by default; toggle with `/dashboard` command (#178)
+- TUI: autocomplete now executes command on selection (single Enter, no confirmation step)
+- TUI: typing `/` shows all available commands
+
 ## [0.1.1] - 2026-03-22
 
 ### Fixed
