@@ -1,24 +1,24 @@
 #!/usr/bin/env node
 // ─── CLIRunner ───
 //
-// Moxen CLI entry point. Wires all dependencies and exposes subcommands:
-//   moxen run --goal <id>            Run CoreLoop once for a given goal
-//   moxen goal add "<description>"   Negotiate and register a new goal (interactive)
-//   moxen goal list                  List all registered goals
-//   moxen goal archive <id>          Archive a completed goal
-//   moxen goal show <id>             Show goal details
-//   moxen goal reset <id>            Reset goal state for re-running
-//   moxen status --goal <id>         Show current progress report
-//   moxen report --goal <id>         Show latest report
-//   moxen log --goal <id>            View execution/observation log
-//   moxen start --goal <id>          Start daemon mode for one or more goals
-//   moxen stop                       Stop the running daemon
-//   moxen cron --goal <id>           Print crontab entry for a goal
-//   moxen cleanup                    Archive all completed goals and remove stale data
-//   moxen improve [path]             Analyze, suggest goals, and run improvement loop
-//   moxen suggest "<context>"        Suggest improvement goals for a project
-//   moxen capability list            List all registered capabilities
-//   moxen capability remove <name>   Remove a capability by name
+// Tavori CLI entry point. Wires all dependencies and exposes subcommands:
+//   tavori run --goal <id>            Run CoreLoop once for a given goal
+//   tavori goal add "<description>"   Negotiate and register a new goal (interactive)
+//   tavori goal list                  List all registered goals
+//   tavori goal archive <id>          Archive a completed goal
+//   tavori goal show <id>             Show goal details
+//   tavori goal reset <id>            Reset goal state for re-running
+//   tavori status --goal <id>         Show current progress report
+//   tavori report --goal <id>         Show latest report
+//   tavori log --goal <id>            View execution/observation log
+//   tavori start --goal <id>          Start daemon mode for one or more goals
+//   tavori stop                       Stop the running daemon
+//   tavori cron --goal <id>           Print crontab entry for a goal
+//   tavori cleanup                    Archive all completed goals and remove stale data
+//   tavori improve [path]             Analyze, suggest goals, and run improvement loop
+//   tavori suggest "<context>"        Suggest improvement goals for a project
+//   tavori capability list            List all registered capabilities
+//   tavori capability remove <name>   Remove a capability by name
 
 import { parseArgs } from "node:util";
 
@@ -61,7 +61,7 @@ const logger = getCliLogger();
 // ─── CLIRunner ───
 
 /**
- * @description Coordinates CLI argument parsing, dependency wiring, and subcommand execution for the Moxen command-line interface.
+ * @description Coordinates CLI argument parsing, dependency wiring, and subcommand execution for the Tavori command-line interface.
  */
 export class CLIRunner {
   private readonly stateManager: StateManager;
@@ -70,7 +70,7 @@ export class CLIRunner {
 
   /**
    * @description Creates a CLI runner with state and character configuration managers rooted at the optional base directory.
-   * @param {string} [baseDir] Optional base directory for Moxen state storage.
+   * @param {string} [baseDir] Optional base directory for Tavori state storage.
    * @returns {void} Does not return a value.
    */
   constructor(baseDir?: string) {
@@ -99,7 +99,7 @@ export class CLIRunner {
   // ─── Main dispatch ───
 
   /**
-   * @description Parses CLI arguments, dispatches the matching Moxen subcommand, and returns the resulting exit code.
+   * @description Parses CLI arguments, dispatches the matching Tavori subcommand, and returns the resulting exit code.
    * @param {string[]} argv Raw subcommand arguments, excluding the `node` executable and script path.
    * @returns {Promise<number>} A promise that resolves to `0` for success, `1` for errors, or `2` for stall escalation.
    */
@@ -147,7 +147,7 @@ export class CLIRunner {
 
       const goalId = values.goal;
       if (!goalId || typeof goalId !== "string") {
-        logger.error("Error: --goal <id> is required for `moxen run`.");
+        logger.error("Error: --goal <id> is required for `tavori run`.");
         return 1;
       }
 
@@ -227,7 +227,7 @@ export class CLIRunner {
         if (rawDimensions.length > 0 && !addValues.negotiate) {
           const title = addValues.title || description;
           if (!title) {
-            logger.error("Error: --title or description is required. Usage: moxen goal add --title \"tsc zero\" --dim \"tsc_error_count:min:0\"");
+            logger.error("Error: --title or description is required. Usage: tavori goal add --title \"tsc zero\" --dim \"tsc_error_count:min:0\"");
             return 1;
           }
           return await cmdGoalAddRaw(this.stateManager, { title, description, rawDimensions });
@@ -235,7 +235,7 @@ export class CLIRunner {
 
         // Negotiate mode: requires description
         if (!description) {
-          logger.error('Error: description is required. Usage: moxen goal add "<description>" [--negotiate]');
+          logger.error('Error: description is required. Usage: tavori goal add "<description>" [--negotiate]');
           return 1;
         }
 
@@ -262,7 +262,7 @@ export class CLIRunner {
       if (goalSubcommand === "archive") {
         const goalId = argv[2];
         if (!goalId) {
-          logger.error("Error: goal ID is required. Usage: moxen goal archive <id>");
+          logger.error("Error: goal ID is required. Usage: tavori goal archive <id>");
           return 1;
         }
         let archiveValues: { yes?: boolean; force?: boolean } = {};
@@ -285,7 +285,7 @@ export class CLIRunner {
       if (goalSubcommand === "remove") {
         const goalId = argv[2];
         if (!goalId) {
-          logger.error("Error: goal ID is required. Usage: moxen goal remove <id>");
+          logger.error("Error: goal ID is required. Usage: tavori goal remove <id>");
           return 1;
         }
         const deleted = await this.stateManager.deleteGoal(goalId);
@@ -301,7 +301,7 @@ export class CLIRunner {
       if (goalSubcommand === "show") {
         const goalId = argv[2];
         if (!goalId) {
-          logger.error("Error: goal ID is required. Usage: moxen goal show <id>");
+          logger.error("Error: goal ID is required. Usage: tavori goal show <id>");
           return 1;
         }
         return await cmdGoalShow(this.stateManager, goalId);
@@ -310,7 +310,7 @@ export class CLIRunner {
       if (goalSubcommand === "reset") {
         const goalId = argv[2];
         if (!goalId) {
-          logger.error("Error: goal ID is required. Usage: moxen goal reset <id>");
+          logger.error("Error: goal ID is required. Usage: tavori goal reset <id>");
           return 1;
         }
         return await cmdGoalReset(this.stateManager, goalId);
@@ -338,7 +338,7 @@ export class CLIRunner {
 
       const goalId = values.goal;
       if (!goalId || typeof goalId !== "string") {
-        logger.error("Error: --goal <id> is required for `moxen status`.");
+        logger.error("Error: --goal <id> is required for `tavori status`.");
         return 1;
       }
 
@@ -362,7 +362,7 @@ export class CLIRunner {
 
       const goalId = values.goal;
       if (!goalId || typeof goalId !== "string") {
-        logger.error("Error: --goal <id> is required for `moxen report`.");
+        logger.error("Error: --goal <id> is required for `tavori report`.");
         return 1;
       }
 
@@ -386,7 +386,7 @@ export class CLIRunner {
 
       const goalId = values.goal;
       if (!goalId || typeof goalId !== "string") {
-        logger.error("Error: --goal <id> is required for `moxen log`.");
+        logger.error("Error: --goal <id> is required for `tavori log`.");
         return 1;
       }
 

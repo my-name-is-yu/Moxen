@@ -1,6 +1,6 @@
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
-import { getMoxenDirPath } from "./utils/paths.js";
+import { getTavoriDirPath } from "./utils/paths.js";
 import { StateError } from "./utils/errors.js";
 import { writeJsonFileAtomic } from "./utils/json-io.js";
 import type { Logger } from "./runtime/logger.js";
@@ -15,7 +15,7 @@ import type { PaceSnapshot } from "./types/goal.js";
 
 /**
  * StateManager handles persistence of goals, state vectors, observation logs,
- * and gap history under a base directory (default: ~/.moxen/).
+ * and gap history under a base directory (default: ~/.tavori/).
  *
  * File layout:
  *   <base>/goals/<goal_id>/goal.json
@@ -33,7 +33,7 @@ export class StateManager {
   private readonly logger?: Logger;
 
   constructor(baseDir?: string, logger?: Logger) {
-    this.baseDir = baseDir ?? getMoxenDirPath();
+    this.baseDir = baseDir ?? getTavoriDirPath();
     this.logger = logger;
   }
 

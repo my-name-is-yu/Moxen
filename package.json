@@ -1,7 +1,7 @@
 {
-  "name": "moxen",
+  "name": "tavori",
   "version": "0.1.2",
-  "description": "AI agent orchestrator that gives existing agents the drive to persist — set a goal, and Moxen observes, delegates, verifies, and loops until done.",
+  "description": "AI agent orchestrator that gives existing agents the drive to persist — set a goal, and Tavori observes, delegates, verifies, and loops until done.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -13,12 +13,12 @@
   },
   "license": "MIT",
   "author": "yuyoshimuta",
-  "homepage": "https://github.com/my-name-is-yu/Moxen#readme",
+  "homepage": "https://github.com/my-name-is-yu/Tavori#readme",
   "bugs": {
-    "url": "https://github.com/my-name-is-yu/Moxen/issues"
+    "url": "https://github.com/my-name-is-yu/Tavori/issues"
   },
   "bin": {
-    "moxen": "dist/cli-runner.js"
+    "tavori": "dist/cli-runner.js"
   },
   "keywords": [
     "ai",
@@ -36,7 +36,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/my-name-is-yu/Moxen.git"
+    "url": "https://github.com/my-name-is-yu/Tavori.git"
   },
   "files": [
     "dist",

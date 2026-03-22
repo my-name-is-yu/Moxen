@@ -1,4 +1,4 @@
-// ─── moxen report command ───
+// ─── tavori report command ───
 
 import { StateManager } from "../../state-manager.js";
 import { ReportingEngine } from "../../reporting-engine.js";
@@ -18,7 +18,7 @@ export async function cmdReport(stateManager: StateManager, goalId: string): Pro
 
   if (reports.length === 0) {
     console.log(`No reports found for goal "${goalId}".`);
-    console.log(`Run \`moxen run --goal ${goalId}\` to generate reports.`);
+    console.log(`Run \`tavori run --goal ${goalId}\` to generate reports.`);
     return 0;
   }
 

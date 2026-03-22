@@ -1,10 +1,10 @@
 // ─── CLI Dependency Setup ───
 //
-// buildDeps() wires all Moxen dependencies for CLI subcommands.
+// buildDeps() wires all Tavori dependencies for CLI subcommands.
 
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
-import { getMoxenDirPath, getDatasourcesDir } from "../utils/paths.js";
+import { getTavoriDirPath, getDatasourcesDir } from "../utils/paths.js";
 import { readJsonFile } from "../utils/json-io.js";
 
 import { StateManager } from "../state-manager.js";
@@ -56,7 +56,7 @@ export async function buildDeps(
   const trustManager = new TrustManager(stateManager);
   const driveSystem = new DriveSystem(stateManager);
 
-  // Read datasource configs from ~/.moxen/datasources/
+  // Read datasource configs from ~/.tavori/datasources/
   const dsDir = getDatasourcesDir();
   const dataSources: IDataSourceAdapter[] = [];
   try {
@@ -133,13 +133,13 @@ export async function buildDeps(
   );
 
   // MemoryLifecycleManager — wires 3-tier memory model into CoreLoop.
-  const moxenBaseDir = getMoxenDirPath();
+  const tavoriBaseDir = getTavoriDirPath();
   let memoryLifecycleManager: MemoryLifecycleManager | undefined;
   let driveScoreAdapter: DriveScoreAdapter | undefined;
   try {
     driveScoreAdapter = new DriveScoreAdapter();
     memoryLifecycleManager = new MemoryLifecycleManager(
-      moxenBaseDir,
+      tavoriBaseDir,
       llmClient,
       undefined,
       undefined,
@@ -148,7 +148,7 @@ export async function buildDeps(
     );
     memoryLifecycleManager.initializeDirectories();
   } catch (err) {
-    getCliLogger().warn(`[moxen] MemoryLifecycleManager init failed — memory features disabled: ${err instanceof Error ? err.message : String(err)}`);
+    getCliLogger().warn(`[tavori] MemoryLifecycleManager init failed — memory features disabled: ${err instanceof Error ? err.message : String(err)}`);
     memoryLifecycleManager = undefined;
     driveScoreAdapter = undefined;
   }

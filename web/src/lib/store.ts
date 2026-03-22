@@ -1,5 +1,5 @@
 /**
- * Zustand global store for Moxen dashboard.
+ * Zustand global store for Tavori dashboard.
  * Holds goals, sessions, decisions and SSE connection state.
  */
 import { create } from 'zustand';
@@ -8,7 +8,7 @@ import type { GoalSummary, SessionSummary, DecisionRecord, SSEEvent } from './ss
 
 export type { GoalSummary, SessionSummary, DecisionRecord };
 
-interface MoxenStore {
+interface TavoriStore {
   // State
   goals: GoalSummary[];
   sessions: SessionSummary[];
@@ -34,7 +34,7 @@ interface MoxenStore {
   setConnected: (connected: boolean) => void;
 }
 
-export const useMoxenStore = create<MoxenStore>((set, get) => ({
+export const useTavoriStore = create<TavoriStore>((set, get) => ({
   goals: [],
   sessions: [],
   decisions: [],
@@ -132,8 +132,8 @@ export const useMoxenStore = create<MoxenStore>((set, get) => ({
 
 function handleSSEEvent(
   event: SSEEvent,
-  get: () => MoxenStore,
-  set: (partial: Partial<MoxenStore>) => void
+  get: () => TavoriStore,
+  set: (partial: Partial<TavoriStore>) => void
 ) {
   const store = get();
 

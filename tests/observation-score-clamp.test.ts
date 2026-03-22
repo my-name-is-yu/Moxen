@@ -36,7 +36,7 @@ describe("ObservationEngine — score jump suppression (§3.3)", () => {
   let stateManager: StateManager;
 
   beforeEach(() => {
-    tmpDir = makeTempDir("moxen-obs-clamp-");
+    tmpDir = makeTempDir("tavori-obs-clamp-");
     stateManager = new StateManager(tmpDir);
   });
 

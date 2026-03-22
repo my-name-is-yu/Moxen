@@ -59,13 +59,13 @@ export type DriveConfig = z.infer<typeof DriveConfigSchema>;
 
 // --- Event (for drive system) ---
 
-export const MoxenEventSchema = z.object({
+export const TavoriEventSchema = z.object({
   type: z.enum(["external", "internal"]),
   source: z.string(),
   timestamp: z.string(),
   data: z.record(z.string(), z.unknown()),
 });
-export type MoxenEvent = z.infer<typeof MoxenEventSchema>;
+export type TavoriEvent = z.infer<typeof TavoriEventSchema>;
 
 // --- Stage 2 additions ---
 

@@ -32,7 +32,7 @@ const AutoDetectResponseSchema = z.array(AutoDetectItemSchema);
  *   - synergy: progress on goal A helps goal B
  *   - conflict: goals A and B have incompatible objectives
  *
- * Persistence: ~/.moxen/dependency-graph.json (via StateManager.readRaw/writeRaw)
+ * Persistence: ~/.tavori/dependency-graph.json (via StateManager.readRaw/writeRaw)
  */
 export class GoalDependencyGraph {
   private stateManager: StateManager;

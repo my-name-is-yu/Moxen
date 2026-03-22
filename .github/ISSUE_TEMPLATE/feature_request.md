@@ -1,6 +1,6 @@
 ---
 name: Feature Request
-about: Suggest a feature for Moxen
+about: Suggest a feature for Tavori
 labels: enhancement
 ---
 

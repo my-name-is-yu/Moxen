@@ -1,8 +1,8 @@
 /**
  * CLIRunner — plugin subcommand tests
  *
- * Verifies that `moxen plugin list`, `moxen plugin install`, and
- * `moxen plugin remove` work correctly.
+ * Verifies that `tavori plugin list`, `tavori plugin install`, and
+ * `tavori plugin remove` work correctly.
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -135,7 +135,7 @@ let consoleLogs: string[];
 let consoleErrors: string[];
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "moxen-plugin-test-"));
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "tavori-plugin-test-"));
   pluginsDir = path.join(tmpDir, "plugins");
   fs.mkdirSync(pluginsDir, { recursive: true });
   consoleLogs = [];
@@ -304,11 +304,11 @@ describe("cmdPluginInstall — path detection", () => {
     const mockExecFile = vi.fn().mockResolvedValue({ stdout: "", stderr: "" });
 
     // npm install will succeed but manifest won't be found (no actual package installed)
-    const exitCode = await cmdPluginInstall(pluginsDir, ["@moxen-plugins/test"], undefined, mockExecFile as never);
+    const exitCode = await cmdPluginInstall(pluginsDir, ["@tavori-plugins/test"], undefined, mockExecFile as never);
 
     expect(mockExecFile).toHaveBeenCalledWith(
       "npm",
-      expect.arrayContaining(["install", "--prefix", expect.any(String), "@moxen-plugins/test"])
+      expect.arrayContaining(["install", "--prefix", expect.any(String), "@tavori-plugins/test"])
     );
     // fails at manifest read since nothing was actually installed
     expect(exitCode).toBe(1);
@@ -317,11 +317,11 @@ describe("cmdPluginInstall — path detection", () => {
   it("treats bare package name as npm install", async () => {
     const mockExecFile = vi.fn().mockResolvedValue({ stdout: "", stderr: "" });
 
-    const exitCode = await cmdPluginInstall(pluginsDir, ["my-moxen-plugin"], undefined, mockExecFile as never);
+    const exitCode = await cmdPluginInstall(pluginsDir, ["my-tavori-plugin"], undefined, mockExecFile as never);
 
     expect(mockExecFile).toHaveBeenCalledWith(
       "npm",
-      expect.arrayContaining(["install", "--prefix", expect.any(String), "my-moxen-plugin"])
+      expect.arrayContaining(["install", "--prefix", expect.any(String), "my-tavori-plugin"])
     );
     expect(exitCode).toBe(1);
   });
@@ -377,7 +377,7 @@ describe("cmdPluginInstall — npm flow", () => {
     expect(allOutput).toContain("mock-npm-plugin");
   });
 
-  it("returns 1 when plugin requires higher Moxen version", async () => {
+  it("returns 1 when plugin requires higher Tavori version", async () => {
     const mockExecFile = vi.fn().mockImplementation(async (_cmd: string, args: string[]) => {
       const prefixIndex = args.indexOf("--prefix");
       if (prefixIndex !== -1) {
@@ -390,9 +390,9 @@ describe("cmdPluginInstall — npm flow", () => {
           version: "1.0.0",
           type: "notifier",
           capabilities: ["notify"],
-          description: "Requires future Moxen",
+          description: "Requires future Tavori",
           permissions: {},
-          min_moxen_version: "99.0.0",
+          min_tavori_version: "99.0.0",
         };
         fs.writeFileSync(path.join(nodeModulesDir, "plugin.yaml"), yaml.dump(manifest), "utf-8");
       }
@@ -466,8 +466,8 @@ describe("cmdPluginSearch", () => {
 
   it("runs npm search and displays results in table format", async () => {
     const mockResults = [
-      { name: "@moxen-plugins/slack", version: "1.0.0", description: "Slack notifications" },
-      { name: "@moxen-plugins/discord", version: "2.1.0", description: "Discord notifications" },
+      { name: "@tavori-plugins/slack", version: "1.0.0", description: "Slack notifications" },
+      { name: "@tavori-plugins/discord", version: "2.1.0", description: "Discord notifications" },
     ];
     const mockExecFile = vi.fn().mockResolvedValue({
       stdout: JSON.stringify(mockResults),
@@ -477,10 +477,10 @@ describe("cmdPluginSearch", () => {
     const exitCode = await cmdPluginSearch(pluginsDir, ["slack"], mockExecFile as never);
 
     expect(exitCode).toBe(0);
-    expect(mockExecFile).toHaveBeenCalledWith("npm", ["search", "@moxen-plugins/slack", "--json"]);
+    expect(mockExecFile).toHaveBeenCalledWith("npm", ["search", "@tavori-plugins/slack", "--json"]);
     const allOutput = consoleLogs.join("\n");
-    expect(allOutput).toContain("@moxen-plugins/slack");
-    expect(allOutput).toContain("@moxen-plugins/discord");
+    expect(allOutput).toContain("@tavori-plugins/slack");
+    expect(allOutput).toContain("@tavori-plugins/discord");
     expect(allOutput).toContain("1.0.0");
   });
 

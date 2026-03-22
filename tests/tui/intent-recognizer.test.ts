@@ -126,14 +126,14 @@ describe("IntentRecognizer — LLM fallback", () => {
   it("returns chat intent with response for conversational input", async () => {
     const mockResponse = JSON.stringify({
       intent: "chat",
-      response: "Moxen manages goals with measurable dimensions. You currently have no active goals.",
+      response: "Tavori manages goals with measurable dimensions. You currently have no active goals.",
     });
     const llm = makeMockLLMClient(mockResponse);
     const recognizer = new IntentRecognizer(llm);
 
-    const result = await recognizer.recognize("What can Moxen do?");
+    const result = await recognizer.recognize("What can Tavori do?");
     expect(result.intent).toBe("chat");
-    expect(result.response).toBe("Moxen manages goals with measurable dimensions. You currently have no active goals.");
+    expect(result.response).toBe("Tavori manages goals with measurable dimensions. You currently have no active goals.");
   });
 
   it("returns goal_create intent with description in params when user clearly wants to create a goal", async () => {

@@ -76,7 +76,7 @@ describe("StrategyTemplateRegistry", () => {
   let vectorIndex: VectorIndex;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "moxen-str-test-"));
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "tavori-str-test-"));
     embeddingClient = new MockEmbeddingClient(64);
     vectorIndex = new VectorIndex(
       path.join(tmpDir, "vector-index.json"),

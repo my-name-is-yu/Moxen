@@ -5,7 +5,7 @@ import { homedir } from 'os';
 
 export async function GET() {
   try {
-    const sessionsDir = join(homedir(), '.moxen', 'sessions');
+    const sessionsDir = join(homedir(), '.tavori', 'sessions');
 
     let files: string[];
     try {

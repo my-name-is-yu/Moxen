@@ -193,20 +193,20 @@ describe("PagerDutyNotifier — notify() request content", () => {
     expect(payload.payload.custom_details["event_type"]).toBe("stall_detected");
   });
 
-  it("defaults source to 'moxen' when not configured", async () => {
+  it("defaults source to 'tavori' when not configured", async () => {
     await notifier.notify(makeEvent());
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const payload = JSON.parse(init.body as string) as {
       payload: { source: string };
     };
-    expect(payload.payload.source).toBe("moxen");
+    expect(payload.payload.source).toBe("tavori");
   });
 
   it("uses configured source when provided", async () => {
     const notifierWithSource = new PagerDutyNotifier({
       routing_key: "test-key",
-      source: "moxen-production",
+      source: "tavori-production",
     });
 
     await notifierWithSource.notify(makeEvent());
@@ -215,7 +215,7 @@ describe("PagerDutyNotifier — notify() request content", () => {
     const payload = JSON.parse(init.body as string) as {
       payload: { source: string };
     };
-    expect(payload.payload.source).toBe("moxen-production");
+    expect(payload.payload.source).toBe("tavori-production");
   });
 
   it("throws when API returns a non-OK status", async () => {

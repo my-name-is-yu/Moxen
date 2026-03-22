@@ -108,6 +108,6 @@ export async function cmdGoalAddRaw(
     }
   }
 
-  console.log(`\nTo run the loop: moxen run --goal ${goalId}`);
+  console.log(`\nTo run the loop: tavori run --goal ${goalId}`);
   return 0;
 }

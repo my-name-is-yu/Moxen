@@ -17,7 +17,7 @@ interface LearnedPattern {
 
 export async function GET() {
   try {
-    const learningDir = join(homedir(), '.moxen', 'learning');
+    const learningDir = join(homedir(), '.tavori', 'learning');
     let files: string[];
     try {
       files = await readdir(learningDir);

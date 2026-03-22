@@ -1,6 +1,6 @@
 # slack-notifier
 
-A Moxen notifier plugin that sends events to a Slack channel via Incoming Webhook.
+A Tavori notifier plugin that sends events to a Slack channel via Incoming Webhook.
 
 ## Requirements
 
@@ -9,19 +9,19 @@ A Moxen notifier plugin that sends events to a Slack channel via Incoming Webhoo
 
 ## Installation
 
-Copy (or symlink) this directory into `~/.moxen/plugins/slack-notifier/` and build it:
+Copy (or symlink) this directory into `~/.tavori/plugins/slack-notifier/` and build it:
 
 ```bash
 npm install
 npm run build
 ```
 
-Then create `~/.moxen/plugins/slack-notifier/config.json`:
+Then create `~/.tavori/plugins/slack-notifier/config.json`:
 
 ```json
 {
   "webhook_url": "https://hooks.slack.com/services/T.../B.../...",
-  "channel": "#moxen-alerts",
+  "channel": "#tavori-alerts",
   "mention_on_critical": true
 }
 ```

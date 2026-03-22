@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getStateManager } from '../../../lib/moxen-client';
+import { getStateManager } from '../../../lib/tavori-client';
 
 export async function GET() {
   try {

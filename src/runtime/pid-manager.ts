@@ -5,7 +5,7 @@ import { writeJsonFile } from "../utils/json-io.js";
 export class PIDManager {
   private pidPath: string;
 
-  constructor(baseDir: string, pidFile: string = "moxen.pid") {
+  constructor(baseDir: string, pidFile: string = "tavori.pid") {
     this.pidPath = path.join(baseDir, pidFile);
   }
 

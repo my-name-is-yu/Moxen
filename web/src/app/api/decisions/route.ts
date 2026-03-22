@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { readdir, readFile } from 'fs/promises';
 import { join } from 'path';
 import { homedir } from 'os';
-import { getStateManager } from '../../../lib/moxen-client';
+import { getStateManager } from '../../../lib/tavori-client';
 
 interface DecisionEntry {
   id: string;
@@ -18,11 +18,11 @@ interface DecisionEntry {
 
 export async function GET() {
   try {
-    const decisionsDir = join(homedir(), '.moxen', 'decisions');
+    const decisionsDir = join(homedir(), '.tavori', 'decisions');
     const sm = getStateManager();
     const decisions: DecisionEntry[] = [];
 
-    // Try reading from ~/.moxen/decisions/ directory
+    // Try reading from ~/.tavori/decisions/ directory
     let files: string[];
     try {
       files = await readdir(decisionsDir);

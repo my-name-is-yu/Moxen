@@ -12,7 +12,7 @@ function makeStoreBacked() {
     writeRaw: vi.fn(async (path: string, data: unknown) => {
       stored[path] = data;
     }),
-    getBaseDir: vi.fn(() => "/tmp/test-moxen"),
+    getBaseDir: vi.fn(() => "/tmp/test-tavori"),
   } as unknown as StateManager;
   return { stored, stateManager };
 }

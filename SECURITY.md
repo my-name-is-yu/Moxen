@@ -1,13 +1,13 @@
 # Security Policy
 
-Thank you for helping keep Moxen secure. This document describes how to report security vulnerabilities and explains Moxen's security architecture.
+Thank you for helping keep Tavori secure. This document describes how to report security vulnerabilities and explains Tavori's security architecture.
 
 ## Reporting Security Vulnerabilities
 
-If you discover a security vulnerability in Moxen, please report it responsibly:
+If you discover a security vulnerability in Tavori, please report it responsibly:
 
 ### Option 1: GitHub Security Advisory (Recommended)
-Use GitHub's [Security Advisory](https://github.com/my-name-is-yu/Moxen/security/advisories) feature to report vulnerabilities privately. This allows coordinated disclosure before public announcement.
+Use GitHub's [Security Advisory](https://github.com/my-name-is-yu/Tavori/security/advisories) feature to report vulnerabilities privately. This allows coordinated disclosure before public announcement.
 
 ### Option 2: Email
 Email your report to [yuyoshimuta@gmail.com](mailto:yuyoshimuta@gmail.com) with:
@@ -20,12 +20,12 @@ Email your report to [yuyoshimuta@gmail.com](mailto:yuyoshimuta@gmail.com) with:
 
 ## Scope: What Counts as a Security Issue
 
-We consider the following as security issues in Moxen's scope:
+We consider the following as security issues in Tavori's scope:
 
 - **Privilege escalation** — any ability to execute unauthorized actions with elevated permissions
-- **Approval bypass** — circumventing Moxen's irreversible-action approval gates
-- **State tampering** — unauthorized read/write access to `~/.moxen/` state files without proper protections
-- **Plugin injection** — loading malicious code from `~/.moxen/plugins/` via path traversal or symlink attacks
+- **Approval bypass** — circumventing Tavori's irreversible-action approval gates
+- **State tampering** — unauthorized read/write access to `~/.tavori/` state files without proper protections
+- **Plugin injection** — loading malicious code from `~/.tavori/plugins/` via path traversal or symlink attacks
 - **LLM prompt injection** — ability to override goal definitions or manipulate decision logic through crafted inputs
 - **Information disclosure** — exposure of sensitive data (API keys, goal details, session logs) through logs, error messages, or state files
 - **Denial of service** — infinite loops, unbounded resource consumption, or crashes via malformed input
@@ -33,7 +33,7 @@ We consider the following as security issues in Moxen's scope:
 
 ## Out of Scope
 
-The following are **not** Moxen's responsibility:
+The following are **not** Tavori's responsibility:
 
 - **LLM provider security** — vulnerabilities in OpenAI, Anthropic, or other LLM APIs
 - **User API key management** — how you store, rotate, or protect your own `OPENAI_API_KEY` or `ANTHROPIC_API_KEY` environment variables
@@ -43,7 +43,7 @@ The following are **not** Moxen's responsibility:
 
 ## Security Design Overview
 
-Moxen implements multiple layers of protection:
+Tavori implements multiple layers of protection:
 
 ### 1. EthicsGate (2-Stage Approval)
 Every goal and task passes through a 2-stage ethics check before execution:
@@ -53,7 +53,7 @@ Every goal and task passes through a 2-stage ethics check before execution:
 See `src/ethics-gate.ts` for implementation details.
 
 ### 2. Asymmetric Trust Model
-Moxen uses a failure-penalizing trust system (range `[-100, +100]`):
+Tavori uses a failure-penalizing trust system (range `[-100, +100]`):
 - Success reward: +3
 - Failure penalty: −10
 - Irreversible actions (code execution, state mutation) always require human approval regardless of trust score
@@ -67,15 +67,15 @@ Any action that cannot be undone requires explicit user approval:
 - Plugin loads
 - External system modifications
 
-Moxen never executes these directly; it delegates to agents and verifies results.
+Tavori never executes these directly; it delegates to agents and verifies results.
 
 ### 4. Local State Isolation
-- State stored in user's home directory: `~/.moxen/` (user-owned, not world-readable by default)
+- State stored in user's home directory: `~/.tavori/` (user-owned, not world-readable by default)
 - No network exposure of state files (unless you explicitly configure event listeners)
 - State includes confidence scores to distinguish high-evidence observations from self-reports
 
 ### 5. Plugin Sandboxing (Minimal)
-- Plugins load from `~/.moxen/plugins/` only
+- Plugins load from `~/.tavori/plugins/` only
 - Each plugin is require()'d as-is; no source code verification
 - Recommendation: **review plugin source code before installation**; use version pinning in your plugin manifest
 
@@ -87,16 +87,16 @@ We aim to:
 3. Release a patch within 2 weeks (or earlier for critical issues)
 4. Credit the reporter (unless you prefer anonymity)
 
-## Security Best Practices for Moxen Users
+## Security Best Practices for Tavori Users
 
 1. **Rotate API keys regularly** — treat `OPENAI_API_KEY` and `ANTHROPIC_API_KEY` like credentials
-2. **Review goals before execution** — use `moxen goal list` and `moxen status` before running the core loop
-3. **Audit plugin sources** — inspect `~/.moxen/plugins/` contents before trusting them
-4. **Run Moxen in restricted environments** — use containers or VMs if you're automating high-risk tasks
-5. **Monitor state changes** — check `~/.moxen/` periodically for unexpected modifications
-6. **Use version pinning** — in `package.json`, pin Moxen to a specific version or narrow semver range
+2. **Review goals before execution** — use `tavori goal list` and `tavori status` before running the core loop
+3. **Audit plugin sources** — inspect `~/.tavori/plugins/` contents before trusting them
+4. **Run Tavori in restricted environments** — use containers or VMs if you're automating high-risk tasks
+5. **Monitor state changes** — check `~/.tavori/` periodically for unexpected modifications
+6. **Use version pinning** — in `package.json`, pin Tavori to a specific version or narrow semver range
 
 ## Contact
 
-- **GitHub**: [my-name-is-yu/Moxen](https://github.com/my-name-is-yu/Moxen)
+- **GitHub**: [my-name-is-yu/Tavori](https://github.com/my-name-is-yu/Tavori)
 - **Email**: [yuyoshimuta@gmail.com](mailto:yuyoshimuta@gmail.com)
