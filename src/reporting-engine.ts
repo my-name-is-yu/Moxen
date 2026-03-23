@@ -108,7 +108,7 @@ export class ReportingEngine {
       const progressSummary =
         observation.length > 0
           ? observation
-              .map((o) => `${o.dimensionName}: ${(o.progress * 100).toFixed(1)}%`)
+              .map((o) => `${o.dimensionName}: ${o.progress.toFixed(1)}`)
               .join(", ")
           : "no observations";
       content =
@@ -121,7 +121,7 @@ export class ReportingEngine {
         obsTable += "| (none) | — | — |\n";
       } else {
         for (const obs of observation) {
-          const progress = (obs.progress * 100).toFixed(1) + "%";
+          const progress = obs.progress.toFixed(1);
           const confidence = (obs.confidence * 100).toFixed(1) + "%";
           obsTable += `| ${obs.dimensionName} | ${progress} | ${confidence} |\n`;
         }

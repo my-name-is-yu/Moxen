@@ -63,11 +63,11 @@ describe("generateExecutionSummary", () => {
     expect(report.content).toContain("build_pass");
   });
 
-  it("formats progress and confidence as percentages", () => {
+  it("formats progress as raw value and confidence as percentage", () => {
     const report = engine.generateExecutionSummary(makeBaseParams({
       observation: [{ dimensionName: "dim_x", progress: 0.75, confidence: 0.8 }],
     }));
-    expect(report.content).toContain("75.0%");
+    expect(report.content).toContain("0.8");
     expect(report.content).toContain("80.0%");
   });
 
