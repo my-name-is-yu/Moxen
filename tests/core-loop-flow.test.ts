@@ -552,6 +552,28 @@ describe("CoreLoop", async () => {
 
       expect(result.finalStatus).toBe("max_iterations");
     });
+
+    it("runs stall detection when gap=0 but is_complete=false", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      await mocks.stateManager.saveGoal(makeGoal());
+
+      // gap=0 triggers skipTaskGeneration
+      mocks.gapCalculator.aggregateGaps.mockReturnValue(0);
+      // SatisficingJudge says not complete (e.g. low confidence)
+      mocks.satisficingJudge.isGoalComplete.mockReturnValue(
+        makeCompletionJudgment({ is_complete: false })
+      );
+      // Stall is detected
+      mocks.stallDetector.checkDimensionStall.mockReturnValue(makeStallReport());
+
+      const loop = new CoreLoop(deps, { delayBetweenLoopsMs: 0 });
+      const result = await loop.runOneIteration("goal-1", 0);
+
+      expect(result.stallDetected).toBe(true);
+      expect(result.stallReport).not.toBeNull();
+      // Task cycle should NOT have run (gap=0 means no task needed)
+      expect(mocks.taskLifecycle.runTaskCycle).not.toHaveBeenCalled();
+    });
   });
 
   // ─── Task cycle results ───

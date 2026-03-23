@@ -637,7 +637,16 @@ export async function cmdImprove(
     return 1;
   }
 
-  const suggestions = Array.isArray(rawSuggestions) ? rawSuggestions as GoalSuggestion[] : [];
+  const repoFiles: string[] = [];
+  const normalizedPayload = normalizeSuggestPayload(
+    rawSuggestions,
+    targetPath,
+    targetPath,
+    context,
+    maxSuggestions,
+    repoFiles
+  );
+  const suggestions = normalizedPayload.suggestions;
 
   if (suggestions.length === 0) {
     console.log("No improvement goals found for the given path.");
@@ -672,11 +681,13 @@ export async function cmdImprove(
   }
 
   // Step 4: Negotiate the selected goal
+  // Use steps joined as description; steps[0] carries the actionable description from normalization
+  const selectedDescription = selected.steps.join("\n");
   console.log(`[Tavori Improve] Negotiating goal: "${selected.title}"...`);
   let goal: Awaited<ReturnType<typeof deps.goalNegotiator.negotiate>>["goal"];
   let response: Awaited<ReturnType<typeof deps.goalNegotiator.negotiate>>["response"];
   try {
-    ({ goal, response } = await deps.goalNegotiator.negotiate(selected.description, {
+    ({ goal, response } = await deps.goalNegotiator.negotiate(selectedDescription, {
       constraints: [],
     }));
   } catch (err) {

@@ -454,6 +454,12 @@ export class CoreLoop {
     await checkCompletionAndMilestones(ctx, goalId, goal, result, startTime);
     if (result.error) return result;
 
+    // 6. Stall detection + rebalance
+    // Run even when gap=0 (skipTaskGeneration=true): if gap=0 persists but
+    // is_complete=false (e.g. waiting for double-confirmation), stall detection
+    // must still fire so the loop can escalate rather than spin indefinitely.
+    await detectStallsAndRebalance(ctx, goalId, goal, result);
+
     // When gap=0, SatisficingJudge in Phase 5 is the authority on completion.
     // If it says not complete (e.g. low confidence), continue the loop normally
     // but skip task generation since there is no gap to close.
@@ -462,9 +468,6 @@ export class CoreLoop {
       result.elapsedMs = Date.now() - startTime;
       return result;
     }
-
-    // 6. Stall detection + rebalance
-    await detectStallsAndRebalance(ctx, goalId, goal, result);
 
     // 6b. Dependency block check
     if (checkDependencyBlock(ctx, goalId, result)) return result;

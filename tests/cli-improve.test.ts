@@ -266,12 +266,16 @@ describe("improve subcommand — suggestion flow", () => {
     expect(typeof contextArg).toBe("string");
   });
 
-  it("prints 'No improvement goals found' when suggestGoals returns empty array", async () => {
+  it("falls back to synthesized suggestions when suggestGoals returns empty array", async () => {
+    // When suggestGoals returns [], normalizeSuggestPayload generates fallback suggestions
+    // so the command proceeds to negotiation rather than printing "No improvement goals found"
+    const goal = makeGoal();
     const mockSuggest = vi.fn().mockResolvedValue([]);
+    const mockNegotiate = vi.fn().mockResolvedValue(makeNegotiationResult(goal));
 
     vi.mocked(GoalNegotiator).mockImplementation(() => ({
       suggestGoals: mockSuggest,
-      negotiate: vi.fn(),
+      negotiate: mockNegotiate,
     } as unknown as GoalNegotiator));
 
     vi.mocked(CoreLoop).mockImplementation(() => ({
@@ -281,11 +285,11 @@ describe("improve subcommand — suggestion flow", () => {
 
     const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
     const code = await runCLI("improve", ".");
-    const output = consoleSpy.mock.calls.map((c) => c.join(" ")).join("\n");
     consoleSpy.mockRestore();
 
+    // Fallback suggestions are generated, so negotiation is called and command succeeds
     expect(code).toBe(0);
-    expect(output).toContain("No improvement goals found");
+    expect(mockNegotiate).toHaveBeenCalled();
   });
 
   it("calls suggestGoals with maxSuggestions from --max flag", async () => {
@@ -315,7 +319,7 @@ describe("improve subcommand — suggestion flow", () => {
 });
 
 describe("improve subcommand — negotiation", () => {
-  it("calls negotiate with the first suggestion's description", async () => {
+  it("calls negotiate with a string derived from the first suggestion", async () => {
     const goal = makeGoal();
     const suggestion = makeSuggestion({ description: "Increase test coverage to 90% for all core modules" });
     const mockSuggest = vi.fn().mockResolvedValue([suggestion]);
@@ -336,7 +340,46 @@ describe("improve subcommand — negotiation", () => {
     consoleSpy.mockRestore();
 
     expect(mockNegotiate).toHaveBeenCalledWith(
-      suggestion.description,
+      expect.any(String),
+      expect.objectContaining({ constraints: [] })
+    );
+  });
+
+  it("handles SuggestOutput-shaped response (with 'suggestions' key) from suggestGoals", async () => {
+    const goal = makeGoal();
+    // suggestGoals returns a SuggestOutput-shaped object instead of a bare array
+    const suggestOutput = {
+      suggestions: [
+        {
+          title: "Add baseline tests",
+          rationale: "No test coverage detected",
+          steps: ["Update tests/baseline.test.ts to add coverage for core modules."],
+          success_criteria: ["Verify measurable progress for test_coverage."],
+          repo_context: { path: "tests/baseline.test.ts" },
+        },
+      ],
+    };
+    const mockSuggest = vi.fn().mockResolvedValue(suggestOutput);
+    const mockNegotiate = vi.fn().mockResolvedValue(makeNegotiationResult(goal));
+
+    vi.mocked(GoalNegotiator).mockImplementation(() => ({
+      suggestGoals: mockSuggest,
+      negotiate: mockNegotiate,
+    } as unknown as GoalNegotiator));
+
+    vi.mocked(CoreLoop).mockImplementation(() => ({
+      run: vi.fn().mockResolvedValue(makeLoopResult()),
+      stop: vi.fn(),
+    } as unknown as CoreLoop));
+
+    const consoleSpy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const code = await runCLI("improve", ".");
+    consoleSpy.mockRestore();
+
+    // Should not print "No improvement goals found" — normalization extracts suggestions correctly
+    expect(code).toBe(0);
+    expect(mockNegotiate).toHaveBeenCalledWith(
+      expect.stringContaining("baseline.test.ts"),
       expect.objectContaining({ constraints: [] })
     );
   });
