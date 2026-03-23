@@ -80,6 +80,10 @@ export async function buildDeps(
             (cfg.connection.commands ?? {}) as Record<string, import("../adapters/shell-datasource.js").ShellCommandSpec>,
             cfg.connection?.path ?? process.cwd()
           );
+          // Propagate scope_goal_id from datasource config for dimension matching
+          if (cfg.scope_goal_id) {
+            (adapter.config as Record<string, unknown>).scope_goal_id = cfg.scope_goal_id;
+          }
           dataSources.push(adapter);
         }
       }

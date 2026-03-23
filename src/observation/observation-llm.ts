@@ -247,7 +247,11 @@ export async function observeWithLLM(
     if (threshold.type === "min" && typeof threshold.value === "number" && threshold.value > 1) {
       extractedValue = score * threshold.value;
     } else if (threshold.type === "max" && typeof threshold.value === "number" && threshold.value > 1) {
-      extractedValue = score * threshold.value;
+      // Invert: score=1.0 means current is AT the max (gap=0); score=0.0 means far above max.
+      // formula: value = threshold * (2 - score)
+      // score=1.0 → threshold (exactly at max, gap=0)
+      // score=0.0 → 2*threshold (double the max, clearly not met)
+      extractedValue = threshold.value * (2 - score);
     }
   } catch { /* keep original score if threshold parsing fails */ }
 

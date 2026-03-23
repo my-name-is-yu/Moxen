@@ -187,17 +187,17 @@ describe("SHELL_DIMENSION_PATTERNS", () => {
     }
   });
 
-  it("todo_count uses grep with comment-aware pattern", () => {
+  it("todo_count uses grep with simple pattern", () => {
     const spec = SHELL_DIMENSION_PATTERNS.todo_count;
     expect(spec.argv[0]).toBe("grep");
-    expect(spec.argv).toContain("-rEc");
+    expect(spec.argv).toContain("-rc");
     expect(spec.argv.some(a => a.includes("TODO"))).toBe(true);
   });
 
-  it("fixme_count uses grep with comment-aware pattern", () => {
+  it("fixme_count uses grep with simple pattern", () => {
     const spec = SHELL_DIMENSION_PATTERNS.fixme_count;
     expect(spec.argv[0]).toBe("grep");
-    expect(spec.argv).toContain("-rEc");
+    expect(spec.argv).toContain("-rc");
     expect(spec.argv.some(a => a.includes("FIXME"))).toBe(true);
   });
 });

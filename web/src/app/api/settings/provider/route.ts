@@ -17,7 +17,11 @@ export async function GET() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const config = JSON.parse(raw) as Record<string, any>;
 
-    // Mask API keys before returning
+    // Mask API key before returning (new flat format)
+    if (config.api_key) {
+      config.api_key = maskApiKey(config.api_key);
+    }
+    // Also handle legacy nested format in case file hasn't been migrated yet
     if (config.anthropic?.api_key) {
       config.anthropic.api_key = maskApiKey(config.anthropic.api_key);
     }
@@ -30,8 +34,9 @@ export async function GET() {
     // File doesn't exist or is unreadable — return defaults
     return NextResponse.json({
       config: {
-        llm_provider: 'codex',
-        default_adapter: 'openai_codex_cli',
+        provider: 'openai',
+        model: 'gpt-5.4-mini',
+        adapter: 'openai_codex_cli',
       },
       exists: false,
     });

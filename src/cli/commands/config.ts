@@ -37,29 +37,39 @@ export async function cmdProvider(argv: string[]): Promise<number> {
   }
 
   if (providerSubcommand === "set") {
-    let values: { llm?: string; adapter?: string };
+    let values: { provider?: string; model?: string; adapter?: string; llm?: string };
     try {
       ({ values } = parseArgs({
         args: argv.slice(1),
         options: {
-          llm: { type: "string" },
+          provider: { type: "string" },
+          model: { type: "string" },
           adapter: { type: "string" },
+          llm: { type: "string" }, // backward compat alias for --provider
         },
         strict: false,
-      }) as { values: { llm?: string; adapter?: string } });
+      }) as { values: { provider?: string; model?: string; adapter?: string; llm?: string } });
     } catch (err) {
       getCliLogger().error(formatOperationError("parse provider set arguments", err));
       values = {};
     }
 
-    const validLlmProviders = ["anthropic", "openai", "ollama", "codex"];
+    // --llm is a backward compat alias for --provider
+    const providerValue = values.provider ?? values.llm;
+
+    const validProviders = ["anthropic", "openai", "ollama"];
     const validAdapters = ["claude_code_cli", "claude_api", "openai_codex_cli", "openai_api", "github_issue"];
 
-    if (values.llm && !validLlmProviders.includes(values.llm)) {
-      getCliLogger().error(
-        `Error: invalid --llm provider "${values.llm}". Valid: ${validLlmProviders.join(", ")}`
-      );
-      return 1;
+    if (providerValue && !validProviders.includes(providerValue)) {
+      // Accept "codex" as alias for "openai" (backward compat)
+      if (providerValue === "codex") {
+        values.provider = "openai";
+      } else {
+        getCliLogger().error(
+          `Error: invalid --provider "${providerValue}". Valid: ${validProviders.join(", ")}`
+        );
+        return 1;
+      }
     }
 
     if (values.adapter && !validAdapters.includes(values.adapter)) {
@@ -70,10 +80,12 @@ export async function cmdProvider(argv: string[]): Promise<number> {
     }
 
     const current = await loadProviderConfig();
+    const resolvedProvider = (values.provider ?? providerValue) as ProviderConfig["provider"] | undefined;
     const updated: ProviderConfig = {
       ...current,
-      ...(values.llm ? { llm_provider: values.llm as ProviderConfig["llm_provider"] } : {}),
-      ...(values.adapter ? { default_adapter: values.adapter as ProviderConfig["default_adapter"] } : {}),
+      ...(resolvedProvider ? { provider: resolvedProvider } : {}),
+      ...(values.model ? { model: values.model } : {}),
+      ...(values.adapter ? { adapter: values.adapter as ProviderConfig["adapter"] } : {}),
     };
 
     await saveProviderConfig(updated);

@@ -33,7 +33,7 @@ Goal: ${description}${constraintsSection}${workspaceSection}
 Each dimension needs: name (snake_case, prefer exact DataSource name), label, threshold_type ("min"|"max"|"range"|"present"|"match"), threshold_value (number/string/bool or null), observation_method_hint.
 
 Rules:
-- 5-7 dimensions max; prefer mechanically measurable (shell/grep/test runner)
+- 100 dimensions max; prefer fewer focused dimensions over many vague ones; prefer mechanically measurable (shell/grep/test runner)
 - "present" only for pure existence checks; use "min" (0.0-1.0) for quality/correctness/completeness
 - No generic dimensions (code_quality, readability) unless goal names them AND a concrete shell command exists
 

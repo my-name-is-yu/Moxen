@@ -88,7 +88,7 @@ export class OpenAILLMClient extends BaseLLMClient implements ILLMClient {
     const createParams: OpenAI.Chat.ChatCompletionCreateParamsNonStreaming = {
       model,
       messages: openAiMessages,
-      max_tokens,
+      max_completion_tokens: max_tokens,
       ...(isReasoningModel(model) ? {} : { temperature }),
     };
 

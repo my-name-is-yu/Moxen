@@ -49,6 +49,15 @@ vi.mock("../src/llm/provider-factory.js", () => ({
   }),
 }));
 
+vi.mock("../src/cli/ensure-api-key.js", () => ({
+  ensureProviderConfig: vi.fn().mockResolvedValue({
+    provider: "anthropic",
+    model: "claude-sonnet-4-6",
+    adapter: "claude_code_cli",
+    api_key: "test-api-key",
+  }),
+}));
+
 vi.mock("../src/core-loop.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../src/core-loop.js")>();
   return {
@@ -135,6 +144,7 @@ import { CLIRunner } from "../src/cli-runner.js";
 import { StateManager } from "../src/state-manager.js";
 import { CoreLoop } from "../src/core-loop.js";
 import { GoalNegotiator, EthicsRejectedError } from "../src/goal/goal-negotiator.js";
+import { ensureProviderConfig } from "../src/cli/ensure-api-key.js";
 import type { LoopResult } from "../src/core-loop.js";
 import { makeTempDir } from "./helpers/temp-dir.js";
 import { makeGoal } from "./helpers/fixtures.js";
@@ -354,7 +364,9 @@ describe("run subcommand", async () => {
   });
 
   it("exits with code 1 when ANTHROPIC_API_KEY is not set", async () => {
-    delete process.env.ANTHROPIC_API_KEY;
+    vi.mocked(ensureProviderConfig).mockRejectedValueOnce(
+      new Error("No API key configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY environment variable")
+    );
     await stateManager.saveGoal(makeGoal({ id: "g-nokey" }));
 
     const code = await runCLI("run", "--goal", "g-nokey");
@@ -492,7 +504,9 @@ describe("goal add subcommand", async () => {
   });
 
   it("exits with code 1 when ANTHROPIC_API_KEY is not set", async () => {
-    delete process.env.ANTHROPIC_API_KEY;
+    vi.mocked(ensureProviderConfig).mockRejectedValueOnce(
+      new Error("No API key configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY environment variable")
+    );
 
     const code = await runCLI("goal", "add", "Build a better README");
     expect(code).toBe(1);
@@ -985,8 +999,9 @@ describe("report subcommand", async () => {
 
 describe("ANTHROPIC_API_KEY", async () => {
   it("exits with code 1 and prints error when key is missing for run", async () => {
-    delete process.env.ANTHROPIC_API_KEY;
-    process.env.TAVORI_LLM_PROVIDER = "anthropic";
+    vi.mocked(ensureProviderConfig).mockRejectedValueOnce(
+      new Error("No API key configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY environment variable")
+    );
     await stateManager.saveGoal(makeGoal({ id: "g-nokey2" }));
 
     const code = await runCLI("run", "--goal", "g-nokey2");
@@ -994,8 +1009,9 @@ describe("ANTHROPIC_API_KEY", async () => {
   });
 
   it("exits with code 1 and prints error when key is missing for goal add", async () => {
-    delete process.env.ANTHROPIC_API_KEY;
-    process.env.TAVORI_LLM_PROVIDER = "anthropic";
+    vi.mocked(ensureProviderConfig).mockRejectedValueOnce(
+      new Error("No API key configured. Set ANTHROPIC_API_KEY or OPENAI_API_KEY environment variable")
+    );
 
     const code = await runCLI("goal", "add", "Some goal");
     expect(code).toBe(1);

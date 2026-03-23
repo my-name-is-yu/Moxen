@@ -363,6 +363,23 @@ export class CoreLoop {
       }
     }
 
+    // Save a final run report for non-completed exits (max_iterations, error, stalled, stopped).
+    // Per-iteration reports are saved inside runOneIteration, but when an iteration exits early
+    // (e.g. gap calculation error, dependency block) no report is written for that iteration.
+    // This guarantees at least one report exists after every run so `tavori status` can display it.
+    if (finalStatus !== "completed" && iterations.length > 0) {
+      try {
+        const finalGoal = await this.deps.stateManager.loadGoal(goalId);
+        if (finalGoal) {
+          const lastIteration = iterations[iterations.length - 1]!;
+          await this.tryGenerateReport(goalId, lastIteration.loopIndex, lastIteration, finalGoal);
+        }
+      } catch (err) {
+        // non-fatal
+        this.logger?.warn("CoreLoop: final run report generation failed", { goalId, finalStatus, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
     return {
       goalId,
       totalIterations: iterations.length,

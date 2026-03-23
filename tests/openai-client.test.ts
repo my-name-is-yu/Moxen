@@ -234,7 +234,7 @@ describe("OpenAILLMClient", () => {
       });
 
       const callArgs = mockCreate.mock.calls[0][0];
-      expect(callArgs.max_tokens).toBe(128);
+      expect(callArgs.max_completion_tokens).toBe(128);
     });
   });
 

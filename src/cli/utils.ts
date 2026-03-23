@@ -40,6 +40,7 @@ Usage:
   tavori plugin list                  List installed plugins
   tavori plugin install <path>        Install a plugin from a local directory
   tavori plugin remove <name>         Remove an installed plugin
+  tavori setup                        Interactive setup wizard (first-time configuration)
   tavori provider show                Show current provider config
   tavori provider set                 Set LLM provider and/or default adapter
 

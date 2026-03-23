@@ -22,68 +22,70 @@ import type { ProviderConfig } from "./provider-config.js";
  * Build an LLM client based on provider configuration.
  *
  * Configuration priority (highest to lowest):
- *   1. TAVORI_LLM_PROVIDER environment variable
- *   2. ~/.tavori/provider.json llm_provider field
+ *   1. TAVORI_PROVIDER environment variable
+ *   2. ~/.tavori/provider.json provider field
  *   3. Default: OpenAI
  *
  * Providers:
- *   - "anthropic" → LLMClient (ANTHROPIC_API_KEY required)
- *   - "openai"    → OpenAILLMClient (OPENAI_API_KEY, OPENAI_MODEL, OPENAI_BASE_URL)
- *   - "ollama"    → OllamaLLMClient (OLLAMA_BASE_URL, OLLAMA_MODEL)
- *   - "codex"     → CodexLLMClient (codex CLI required, OPENAI_MODEL optional)
+ *   - "anthropic" → LLMClient (api_key required)
+ *   - "openai"    → OpenAILLMClient or CodexLLMClient depending on adapter
+ *   - "ollama"    → OllamaLLMClient
  */
 export async function buildLLMClient(): Promise<ILLMClient> {
   const config = await loadProviderConfig();
 
-  switch (config.llm_provider) {
-    case "codex":
-      if (!config.openai?.api_key) {
-        throw new LLMError(
-          "OPENAI_API_KEY is not set.\nSet it via: export OPENAI_API_KEY=sk-..."
-        );
+  switch (config.provider) {
+    case "openai": {
+      // Use CodexLLMClient when adapter is openai_codex_cli
+      if (config.adapter === "openai_codex_cli") {
+        if (!config.api_key) {
+          throw new LLMError(
+            "OPENAI_API_KEY is not set.\nSet it via: export OPENAI_API_KEY=sk-..."
+          );
+        }
+        return new CodexLLMClient({
+          cliPath: config.codex_cli_path,
+          model: config.model,
+        });
       }
-      return new CodexLLMClient({
-        cliPath: config.codex?.cli_path,
-        model: config.codex?.model,
-      });
-
-    case "openai":
-      if (!config.openai?.api_key) {
+      // Otherwise use OpenAILLMClient
+      if (!config.api_key) {
         throw new LLMError(
           "OPENAI_API_KEY is not set.\nSet it via: export OPENAI_API_KEY=sk-..."
         );
       }
       return new OpenAILLMClient({
-        apiKey: config.openai.api_key,
-        model: config.openai?.model,
-        baseURL: config.openai?.base_url,
+        apiKey: config.api_key,
+        model: config.model,
+        baseURL: config.base_url,
       });
+    }
 
     case "ollama":
       return new OllamaLLMClient({
-        baseUrl: config.ollama?.base_url ?? "http://localhost:11434",
-        model: config.ollama?.model ?? "qwen3:4b",
+        baseUrl: config.base_url ?? "http://localhost:11434",
+        model: config.model ?? "qwen3:4b",
       });
 
     case "anthropic":
-      if (!config.anthropic?.api_key) {
+      if (!config.api_key) {
         throw new LLMError(
           "ANTHROPIC_API_KEY is not set.\nSet it via: export ANTHROPIC_API_KEY=sk-ant-..."
         );
       }
-      return new LLMClient(config.anthropic.api_key);
+      return new LLMClient(config.api_key);
 
     default:
-      // Unknown or unset value falls back to OpenAI
-      if (!config.openai?.api_key) {
+      // Unknown provider falls back to OpenAI
+      if (!config.api_key) {
         throw new LLMError(
           "OPENAI_API_KEY is not set.\nSet it via: export OPENAI_API_KEY=sk-..."
         );
       }
       return new OpenAILLMClient({
-        apiKey: config.openai.api_key,
-        model: config.openai?.model,
-        baseURL: config.openai?.base_url,
+        apiKey: config.api_key,
+        model: config.model,
+        baseURL: config.base_url,
       });
   }
 }

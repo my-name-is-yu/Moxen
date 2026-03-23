@@ -6,12 +6,12 @@ import { useTavoriStore } from '../../lib/store';
 // ─── Types ───
 
 interface ProviderConfig {
-  llm_provider: string;
-  default_adapter: string;
-  anthropic?: { api_key?: string; model?: string };
-  openai?: { api_key?: string; model?: string; base_url?: string };
-  ollama?: { base_url?: string; model?: string };
-  codex?: { cli_path?: string; model?: string };
+  provider: string;
+  model: string;
+  adapter: string;
+  api_key?: string;
+  base_url?: string;
+  codex_cli_path?: string;
 }
 
 interface ProviderResponse {
@@ -107,14 +107,6 @@ function ProviderSection() {
   }, []);
 
   const cfg = data?.config;
-  const activeProviderKey = cfg?.llm_provider as keyof typeof cfg | undefined;
-  const activeSection = activeProviderKey && cfg ? cfg[activeProviderKey as 'anthropic' | 'openai' | 'ollama' | 'codex'] : undefined;
-  const activeModel = activeSection && typeof activeSection === 'object' && 'model' in activeSection
-    ? String((activeSection as { model?: string }).model ?? '—')
-    : '—';
-  const activeApiKey = activeSection && typeof activeSection === 'object' && 'api_key' in activeSection
-    ? String((activeSection as { api_key?: string }).api_key ?? '—')
-    : '—';
 
   return (
     <SectionCard title="Provider Configuration">
@@ -129,10 +121,10 @@ function ProviderSection() {
               ~/.tavori/provider.json not found — showing defaults
             </p>
           )}
-          <FieldRow label="LLM Provider" value={cfg?.llm_provider ?? '—'} />
-          <FieldRow label="Default Adapter" value={cfg?.default_adapter ?? '—'} />
-          <FieldRow label="Active Model" value={activeModel} />
-          <FieldRow label="API Key" value={activeApiKey !== '—' ? activeApiKey : <span style={{ color: 'var(--text-tertiary)' }}>not set</span>} />
+          <FieldRow label="Provider" value={cfg?.provider ?? '—'} />
+          <FieldRow label="Model" value={cfg?.model ?? '—'} />
+          <FieldRow label="Adapter" value={cfg?.adapter ?? '—'} />
+          <FieldRow label="API Key" value={cfg?.api_key ? cfg.api_key : <span style={{ color: 'var(--text-tertiary)' }}>not set</span>} />
         </>
       )}
     </SectionCard>

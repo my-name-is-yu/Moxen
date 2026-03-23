@@ -9,37 +9,44 @@ import * as path from "node:path";
 import { getTavoriDirPath } from "../utils/paths.js";
 import { writeJsonFileAtomic } from "../utils/json-io.js";
 
+// ─── Model Registry ───
+
+/**
+ * Known models and their compatible providers/adapters.
+ * Ollama models are dynamic and not listed here.
+ */
+export const MODEL_REGISTRY: Record<string, { provider: string; adapters: string[] }> = {
+  "gpt-5.4-mini": { provider: "openai", adapters: ["openai_codex_cli", "openai_api"] },
+  "gpt-4.1": { provider: "openai", adapters: ["openai_codex_cli", "openai_api"] },
+  "gpt-4o-mini": { provider: "openai", adapters: ["openai_api"] },
+  "o3-mini": { provider: "openai", adapters: ["openai_api"] },
+  "claude-sonnet-4-6": { provider: "anthropic", adapters: ["claude_code_cli", "claude_api"] },
+  "claude-haiku-4-5": { provider: "anthropic", adapters: ["claude_code_cli", "claude_api"] },
+};
+
 // ─── Types ───
 
 export interface ProviderConfig {
-  /** Which provider to use for internal LLM calls (thinking/analysis) */
-  llm_provider: "anthropic" | "openai" | "ollama" | "codex";
+  /** Which provider to use for internal LLM calls */
+  provider: "openai" | "anthropic" | "ollama";
+
+  /** Which model to use */
+  model: string;
 
   /** Which adapter to use by default for task execution */
-  default_adapter: "claude_code_cli" | "claude_api" | "openai_codex_cli" | "openai_api";
+  adapter: "claude_code_cli" | "claude_api" | "openai_codex_cli" | "openai_api";
 
-  /** Provider-specific settings (optional; env vars take precedence) */
-  anthropic?: {
-    api_key?: string;
-    model?: string;
-  };
-  openai?: {
-    api_key?: string;
-    model?: string;
-    base_url?: string;
-  };
-  ollama?: {
-    base_url?: string;
-    model?: string;
-  };
-  codex?: {
-    cli_path?: string;
-    model?: string;
-  };
+  /** API key (for openai or anthropic) */
+  api_key?: string;
+
+  /** Base URL (for ollama or custom endpoints) */
+  base_url?: string;
+
+  /** CLI path for openai_codex_cli adapter */
+  codex_cli_path?: string;
 
   /** A2A protocol agent endpoints */
   a2a?: {
-    /** Map of adapter name -> A2A agent endpoint config */
     agents?: Record<string, {
       base_url: string;
       auth_token?: string;
@@ -51,37 +58,146 @@ export interface ProviderConfig {
   };
 }
 
+/** Old nested provider config format (for migration) */
+interface LegacyProviderConfig {
+  llm_provider: "anthropic" | "openai" | "ollama" | "codex";
+  default_adapter: "claude_code_cli" | "claude_api" | "openai_codex_cli" | "openai_api";
+  anthropic?: { api_key?: string; model?: string };
+  openai?: { api_key?: string; model?: string; base_url?: string };
+  ollama?: { base_url?: string; model?: string };
+  codex?: { cli_path?: string; model?: string };
+  a2a?: ProviderConfig["a2a"];
+}
+
 // ─── Constants ───
 
 const PROVIDER_CONFIG_PATH = path.join(getTavoriDirPath(), "provider.json");
 
 const DEFAULT_PROVIDER_CONFIG: ProviderConfig = {
-  llm_provider: "codex",
-  default_adapter: "openai_codex_cli",
+  provider: "openai",
+  model: "gpt-5.4-mini",
+  adapter: "openai_codex_cli",
 };
 
-// ─── Helpers ───
+// Track whether we've already warned about provider config issues in this process
+let _warnedOnce = false;
+
+// ─── Migration ───
 
 /**
- * Determine LLM provider, with env var taking precedence over config file.
+ * Detect whether a config object is in the old nested format.
  */
-function resolveProvider(
-  fileProvider: ProviderConfig["llm_provider"] | undefined
-): ProviderConfig["llm_provider"] {
-  const envProvider = process.env["TAVORI_LLM_PROVIDER"];
-  if (envProvider === "anthropic" || envProvider === "openai" || envProvider === "ollama" || envProvider === "codex") {
-    return envProvider;
-  }
-  return fileProvider ?? "codex";
+function isLegacyConfig(config: Record<string, unknown>): boolean {
+  return "llm_provider" in config || "default_adapter" in config;
 }
 
 /**
- * Determine default adapter, with env var taking precedence over config file.
+ * Migrate old nested format to new flat format.
  */
+export function migrateProviderConfig(old: LegacyProviderConfig): ProviderConfig {
+  const provider: ProviderConfig["provider"] =
+    old.llm_provider === "codex" ? "openai" : (old.llm_provider ?? "openai");
+
+  // Resolve model from the provider-specific section
+  let model: string;
+  switch (old.llm_provider) {
+    case "codex":
+      model = old.codex?.model ?? old.openai?.model ?? "gpt-5.4-mini";
+      break;
+    case "openai":
+      model = old.openai?.model ?? "gpt-5.4-mini";
+      break;
+    case "anthropic":
+      model = old.anthropic?.model ?? "claude-sonnet-4-6";
+      break;
+    case "ollama":
+      model = old.ollama?.model ?? "qwen3:4b";
+      break;
+    default:
+      model = "gpt-5.4-mini";
+  }
+
+  const adapter: ProviderConfig["adapter"] = old.default_adapter ?? "openai_codex_cli";
+
+  // Resolve api_key from the active provider section
+  const api_key = old.llm_provider === "anthropic"
+    ? old.anthropic?.api_key
+    : (old.openai?.api_key);
+
+  // Resolve base_url
+  const base_url = old.llm_provider === "ollama"
+    ? old.ollama?.base_url
+    : old.openai?.base_url;
+
+  const result: ProviderConfig = { provider, model, adapter };
+  if (api_key !== undefined) result.api_key = api_key;
+  if (base_url !== undefined) result.base_url = base_url;
+  if (old.codex?.cli_path !== undefined) result.codex_cli_path = old.codex.cli_path;
+  if (old.a2a !== undefined) result.a2a = old.a2a;
+
+  return result;
+}
+
+// ─── Validation ───
+
+export interface ValidationResult {
+  valid: boolean;
+  errors: string[];
+}
+
+/**
+ * Validate provider config for model/adapter compatibility and required fields.
+ * Logs warnings but does not throw — allows unknown models for flexibility.
+ */
+export function validateProviderConfig(config: ProviderConfig): ValidationResult {
+  const errors: string[] = [];
+
+  // Check model-adapter compatibility (skip for ollama or unknown models)
+  const registryEntry = MODEL_REGISTRY[config.model];
+  if (registryEntry) {
+    if (registryEntry.provider !== config.provider) {
+      errors.push(
+        `Model "${config.model}" requires provider "${registryEntry.provider}" but got "${config.provider}"`
+      );
+    }
+    if (!registryEntry.adapters.includes(config.adapter)) {
+      errors.push(
+        `Model "${config.model}" is not compatible with adapter "${config.adapter}". Compatible: ${registryEntry.adapters.join(", ")}`
+      );
+    }
+  }
+
+  // Check required api_key
+  if ((config.provider === "openai" || config.provider === "anthropic") && !config.api_key) {
+    const envName = config.provider === "openai" ? "OPENAI_API_KEY" : "ANTHROPIC_API_KEY";
+    errors.push(`API key required for provider "${config.provider}". Set ${envName} or add api_key to config.`);
+  }
+
+  return { valid: errors.length === 0, errors };
+}
+
+// ─── Env Var Resolution ───
+
+function resolveProvider(
+  fileProvider: ProviderConfig["provider"] | undefined
+): ProviderConfig["provider"] {
+  // New env var takes precedence, old alias as fallback
+  const envProvider = process.env["TAVORI_PROVIDER"] ?? process.env["TAVORI_LLM_PROVIDER"];
+  if (envProvider === "anthropic" || envProvider === "openai" || envProvider === "ollama") {
+    return envProvider;
+  }
+  // "codex" env var maps to "openai"
+  if (envProvider === "codex") {
+    return "openai";
+  }
+  return fileProvider ?? "openai";
+}
+
 function resolveAdapter(
-  fileAdapter: ProviderConfig["default_adapter"] | undefined
-): ProviderConfig["default_adapter"] {
-  const envAdapter = process.env["TAVORI_DEFAULT_ADAPTER"];
+  fileAdapter: ProviderConfig["adapter"] | undefined
+): ProviderConfig["adapter"] {
+  // New env var takes precedence, old alias as fallback
+  const envAdapter = process.env["TAVORI_ADAPTER"] ?? process.env["TAVORI_DEFAULT_ADAPTER"];
   if (
     envAdapter === "claude_code_cli" ||
     envAdapter === "claude_api" ||
@@ -93,93 +209,136 @@ function resolveAdapter(
   return fileAdapter ?? "openai_codex_cli";
 }
 
+function resolveModel(
+  fileModel: string | undefined,
+  provider: ProviderConfig["provider"]
+): string {
+  // TAVORI_MODEL always wins (explicit Tavori-specific override)
+  const envModel = process.env["TAVORI_MODEL"];
+  if (envModel) return envModel;
+
+  // provider.json explicit value takes priority over generic env vars
+  if (fileModel) return fileModel;
+
+  // Provider-specific env vars apply only as fallback when model is not set in provider.json
+  if (provider === "openai") {
+    const m = process.env["OPENAI_MODEL"];
+    if (m) return m;
+  } else if (provider === "anthropic") {
+    const m = process.env["ANTHROPIC_MODEL"];
+    if (m) return m;
+  } else if (provider === "ollama") {
+    const m = process.env["OLLAMA_MODEL"];
+    if (m) return m;
+  }
+
+  // Defaults per provider
+  switch (provider) {
+    case "anthropic": return "claude-sonnet-4-6";
+    case "ollama": return "qwen3:4b";
+    default: return "gpt-5.4-mini";
+  }
+}
+
+function resolveApiKey(
+  fileKey: string | undefined,
+  provider: ProviderConfig["provider"]
+): string | undefined {
+  if (provider === "anthropic") {
+    return process.env["ANTHROPIC_API_KEY"] ?? fileKey;
+  }
+  // openai (and codex) both use OPENAI_API_KEY
+  if (provider === "openai") {
+    return process.env["OPENAI_API_KEY"] ?? fileKey;
+  }
+  return fileKey;
+}
+
+function resolveBaseUrl(
+  fileUrl: string | undefined,
+  provider: ProviderConfig["provider"]
+): string | undefined {
+  if (provider === "ollama") {
+    return process.env["OLLAMA_BASE_URL"] ?? fileUrl;
+  }
+  if (provider === "openai") {
+    return process.env["OPENAI_BASE_URL"] ?? fileUrl;
+  }
+  return fileUrl;
+}
+
 // ─── Public API ───
 
 /**
  * Load provider configuration.
  *
  * Priority (highest to lowest):
- *   1. Environment variables (TAVORI_LLM_PROVIDER, TAVORI_DEFAULT_ADAPTER, etc.)
+ *   1. Environment variables (TAVORI_PROVIDER, TAVORI_ADAPTER, TAVORI_MODEL, etc.)
  *   2. ~/.tavori/provider.json
- *   3. Defaults (codex + openai_codex_cli)
+ *   3. Defaults (openai + gpt-5.4-mini + openai_codex_cli)
  *
- * If no provider.json exists, falls back to env vars and defaults (current behavior).
+ * Auto-migrates old nested format to new flat format.
  */
 export async function loadProviderConfig(): Promise<ProviderConfig> {
   let fileConfig: Partial<ProviderConfig> = {};
+  let needsMigrationSave = false;
 
   try {
     await fsp.access(PROVIDER_CONFIG_PATH);
     try {
       const raw = await fsp.readFile(PROVIDER_CONFIG_PATH, "utf-8");
-      fileConfig = JSON.parse(raw) as Partial<ProviderConfig>;
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+
+      if (isLegacyConfig(parsed)) {
+        fileConfig = migrateProviderConfig(parsed as unknown as LegacyProviderConfig);
+        needsMigrationSave = true;
+      } else {
+        fileConfig = parsed as Partial<ProviderConfig>;
+      }
     } catch {
-      // If the file is malformed, treat it as empty (fall back to env/defaults)
       fileConfig = {};
     }
   } catch {
-    // File does not exist — use env/defaults
+    // File does not exist
   }
 
-  // Build merged config: file values as base, env vars override
-  const config: ProviderConfig = {
-    llm_provider: resolveProvider(fileConfig.llm_provider),
-    default_adapter: resolveAdapter(fileConfig.default_adapter),
-  };
+  const provider = resolveProvider(fileConfig.provider);
+  const model = resolveModel(fileConfig.model, provider);
+  const adapter = resolveAdapter(fileConfig.adapter);
+  const api_key = resolveApiKey(fileConfig.api_key, provider);
+  const base_url = resolveBaseUrl(fileConfig.base_url, provider);
 
-  // Merge anthropic section — env vars override file values
-  const anthropicApiKey = process.env["ANTHROPIC_API_KEY"] ?? fileConfig.anthropic?.api_key;
-  const anthropicModel = process.env["ANTHROPIC_MODEL"] ?? fileConfig.anthropic?.model;
-  if (anthropicApiKey !== undefined || anthropicModel !== undefined) {
-    config.anthropic = {
-      ...(fileConfig.anthropic ?? {}),
-      ...(anthropicApiKey !== undefined ? { api_key: anthropicApiKey } : {}),
-      ...(anthropicModel !== undefined ? { model: anthropicModel } : {}),
-    };
-  } else if (fileConfig.anthropic) {
-    config.anthropic = fileConfig.anthropic;
+  const config: ProviderConfig = { provider, model, adapter };
+  if (api_key !== undefined) config.api_key = api_key;
+  if (base_url !== undefined) config.base_url = base_url;
+  if (fileConfig.codex_cli_path !== undefined) config.codex_cli_path = fileConfig.codex_cli_path;
+  if (fileConfig.a2a !== undefined) config.a2a = fileConfig.a2a;
+
+  // Validate and log warnings (only once per process)
+  const validation = validateProviderConfig(config);
+  if (!validation.valid && !_warnedOnce) {
+    for (const err of validation.errors) {
+      console.warn(`[provider-config] Warning: ${err}`);
+    }
+    _warnedOnce = true;
   }
 
-  // Merge openai section — env vars override file values
-  const openaiApiKey = process.env["OPENAI_API_KEY"] ?? fileConfig.openai?.api_key;
-  const openaiModel = process.env["OPENAI_MODEL"] ?? fileConfig.openai?.model;
-  const openaiBaseUrl = process.env["OPENAI_BASE_URL"] ?? fileConfig.openai?.base_url;
-  if (openaiApiKey !== undefined || openaiModel !== undefined || openaiBaseUrl !== undefined) {
-    config.openai = {
-      ...(fileConfig.openai ?? {}),
-      ...(openaiApiKey !== undefined ? { api_key: openaiApiKey } : {}),
-      ...(openaiModel !== undefined ? { model: openaiModel } : {}),
-      ...(openaiBaseUrl !== undefined ? { base_url: openaiBaseUrl } : {}),
-    };
-  } else if (fileConfig.openai) {
-    config.openai = fileConfig.openai;
-  }
-
-  // Merge ollama section — env vars override file values
-  const ollamaBaseUrl = process.env["OLLAMA_BASE_URL"] ?? fileConfig.ollama?.base_url;
-  const ollamaModel = process.env["OLLAMA_MODEL"] ?? fileConfig.ollama?.model;
-  if (ollamaBaseUrl !== undefined || ollamaModel !== undefined) {
-    config.ollama = {
-      ...(fileConfig.ollama ?? {}),
-      ...(ollamaBaseUrl !== undefined ? { base_url: ollamaBaseUrl } : {}),
-      ...(ollamaModel !== undefined ? { model: ollamaModel } : {}),
-    };
-  } else if (fileConfig.ollama) {
-    config.ollama = fileConfig.ollama;
-  }
-
-  // Merge codex section — env vars override file values
-  const codexModel = process.env["OPENAI_MODEL"] ?? fileConfig.codex?.model;
-  if (fileConfig.codex || codexModel !== undefined) {
-    config.codex = {
-      ...(fileConfig.codex ?? {}),
-      ...(codexModel !== undefined ? { model: codexModel } : {}),
-    };
-  }
-
-  // Merge a2a section — pass through from file config
-  if (fileConfig.a2a) {
-    config.a2a = fileConfig.a2a;
+  // Auto-save migrated config (save file-only values, not env-var-resolved ones)
+  if (needsMigrationSave) {
+    try {
+      const fileOnly: ProviderConfig = {
+        provider: fileConfig.provider ?? "openai",
+        model: fileConfig.model ?? "gpt-5.4-mini",
+        adapter: fileConfig.adapter ?? "openai_codex_cli",
+      };
+      if (fileConfig.api_key !== undefined) fileOnly.api_key = fileConfig.api_key;
+      if (fileConfig.base_url !== undefined) fileOnly.base_url = fileConfig.base_url;
+      if (fileConfig.codex_cli_path !== undefined) fileOnly.codex_cli_path = fileConfig.codex_cli_path;
+      if (fileConfig.a2a !== undefined) fileOnly.a2a = fileConfig.a2a;
+      await saveProviderConfig(fileOnly);
+    } catch {
+      // Best-effort — don't fail if we can't save
+    }
   }
 
   return config;

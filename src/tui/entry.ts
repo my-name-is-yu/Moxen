@@ -252,7 +252,7 @@ export async function startTUI(): Promise<void> {
   const breadcrumb = {
     cwd: getCwd(),
     gitBranch: getGitBranch(),
-    providerName: providerConfig.llm_provider,
+    providerName: providerConfig.provider,
   };
 
   // 6. Render Ink app — loop deps passed directly; App calls useLoop() internally

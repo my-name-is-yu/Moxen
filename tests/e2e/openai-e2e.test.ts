@@ -56,7 +56,9 @@ describe.skipIf(!API_KEY_SET)("OpenAI E2E — real API calls", () => {
     "buildLLMClient() with TAVORI_LLM_PROVIDER=openai creates an OpenAILLMClient",
     async () => {
       const originalProvider = process.env["TAVORI_LLM_PROVIDER"];
+      const originalAdapter = process.env["TAVORI_ADAPTER"];
       process.env["TAVORI_LLM_PROVIDER"] = "openai";
+      process.env["TAVORI_ADAPTER"] = "openai_api";
 
       try {
         const client = await buildLLMClient();
@@ -73,6 +75,11 @@ describe.skipIf(!API_KEY_SET)("OpenAI E2E — real API calls", () => {
           delete process.env["TAVORI_LLM_PROVIDER"];
         } else {
           process.env["TAVORI_LLM_PROVIDER"] = originalProvider;
+        }
+        if (originalAdapter === undefined) {
+          delete process.env["TAVORI_ADAPTER"];
+        } else {
+          process.env["TAVORI_ADAPTER"] = originalAdapter;
         }
       }
     },

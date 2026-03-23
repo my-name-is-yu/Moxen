@@ -53,40 +53,51 @@ describe('GET /api/settings/provider', () => {
     const res = await getProvider();
     const body = await res.json();
     expect(body.exists).toBe(false);
-    expect(body.config.llm_provider).toBe('codex');
-    expect(body.config.default_adapter).toBe('openai_codex_cli');
+    expect(body.config.provider).toBe('openai');
+    expect(body.config.adapter).toBe('openai_codex_cli');
   });
 
-  it('returns masked API keys from provider.json', async () => {
+  it('returns masked API key from provider.json (new flat format)', async () => {
     const config = {
-      llm_provider: 'anthropic',
-      anthropic: { api_key: 'sk-ant-secret12345' },
-      openai: { api_key: 'sk-openai-secret67890' },
+      provider: 'openai',
+      model: 'gpt-5.4-mini',
+      adapter: 'openai_codex_cli',
+      api_key: 'sk-openai-secret67890',
     };
     fsMockReadFile = async () => JSON.stringify(config);
     const res = await getProvider();
     const body = await res.json();
     expect(body.exists).toBe(true);
-    expect(body.config.anthropic.api_key).toBe('sk-a****');
-    expect(body.config.openai.api_key).toBe('sk-o****');
-    expect(body.config.anthropic.api_key).not.toContain('secret');
+    expect(body.config.api_key).toBe('sk-o****');
+    expect(body.config.api_key).not.toContain('secret');
   });
 
   it('masks short keys (<=4 chars) as ****', async () => {
-    const config = { anthropic: { api_key: 'abc' } };
+    const config = { provider: 'openai', model: 'gpt-5.4-mini', adapter: 'openai_api', api_key: 'abc' };
     fsMockReadFile = async () => JSON.stringify(config);
     const res = await getProvider();
     const body = await res.json();
-    expect(body.config.anthropic.api_key).toBe('****');
+    expect(body.config.api_key).toBe('****');
   });
 
-  it('returns config without masking when no API keys present', async () => {
-    const config = { llm_provider: 'codex' };
+  it('returns config without masking when no API key present', async () => {
+    const config = { provider: 'openai', model: 'gpt-5.4-mini', adapter: 'openai_codex_cli' };
     fsMockReadFile = async () => JSON.stringify(config);
     const res = await getProvider();
     const body = await res.json();
     expect(body.exists).toBe(true);
-    expect(body.config.llm_provider).toBe('codex');
+    expect(body.config.provider).toBe('openai');
+  });
+
+  it('masks legacy nested API keys for backward compat', async () => {
+    const config = {
+      provider: 'anthropic',
+      anthropic: { api_key: 'sk-ant-secret12345' },
+    };
+    fsMockReadFile = async () => JSON.stringify(config);
+    const res = await getProvider();
+    const body = await res.json();
+    expect(body.config.anthropic.api_key).toBe('sk-a****');
   });
 });
 

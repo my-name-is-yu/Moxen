@@ -54,6 +54,7 @@ import {
 } from "./cli/commands/config.js";
 import { cmdStart, cmdStop, cmdCron } from "./cli/commands/daemon.js";
 import { cmdSuggest, cmdImprove } from "./cli/commands/suggest.js";
+import { cmdSetup } from "./cli/commands/setup.js";
 import { printUsage, formatOperationError } from "./cli/utils.js";
 
 const logger = getCliLogger();
@@ -519,6 +520,10 @@ export class CLIRunner {
     if (subcommand === "improve") {
       const improveArgs = globalYes ? [...argv.slice(1), "--yes"] : argv.slice(1);
       return await cmdImprove(this.stateManager, this.characterConfigManager, improveArgs);
+    }
+
+    if (subcommand === "setup") {
+      return await cmdSetup(argv.slice(1));
     }
 
     if (subcommand === "tui") {

@@ -390,6 +390,55 @@ describe("CoreLoop", async () => {
 
       expect(mocks.reportingEngine.generateExecutionSummary).toHaveBeenCalled();
     });
+
+    it("saves a final report after max_iterations exit", async () => {
+      // Issue #188: max_iterations exit must produce at least one saved report.
+      const { deps, mocks } = createMockDeps(tmpDir);
+      await mocks.stateManager.saveGoal(makeGoal());
+      // Never complete
+      mocks.satisficingJudge.isGoalComplete.mockReturnValue(makeCompletionJudgment());
+
+      const loop = new CoreLoop(deps, { maxIterations: 2, delayBetweenLoopsMs: 0 });
+      const result = await loop.run("goal-1");
+
+      expect(result.finalStatus).toBe("max_iterations");
+      // saveReport should have been called at least once (per-iteration + final)
+      expect(mocks.reportingEngine.saveReport).toHaveBeenCalled();
+    });
+
+    it("saves a final report after stalled exit", async () => {
+      // All exit paths must produce at least one saved report.
+      const { deps, mocks } = createMockDeps(tmpDir);
+      await mocks.stateManager.saveGoal(makeGoal());
+      mocks.satisficingJudge.isGoalComplete.mockReturnValue(makeCompletionJudgment());
+      // Always escalate to level 3 → stalled exit
+      mocks.stallDetector.checkDimensionStall.mockReturnValue(
+        makeStallReport({ escalation_level: 3 })
+      );
+      mocks.stallDetector.getEscalationLevel.mockReturnValue(3);
+
+      const loop = new CoreLoop(deps, { maxIterations: 10, delayBetweenLoopsMs: 0 });
+      const result = await loop.run("goal-1");
+
+      expect(result.finalStatus).toBe("stalled");
+      expect(mocks.reportingEngine.saveReport).toHaveBeenCalled();
+    });
+
+    it("saves a final report after error exit", async () => {
+      const { deps, mocks } = createMockDeps(tmpDir);
+      await mocks.stateManager.saveGoal(makeGoal());
+      mocks.taskLifecycle.runTaskCycle.mockRejectedValue(new Error("persistent error"));
+
+      const loop = new CoreLoop(deps, {
+        maxIterations: 10,
+        maxConsecutiveErrors: 1,
+        delayBetweenLoopsMs: 0,
+      });
+      const result = await loop.run("goal-1");
+
+      expect(result.finalStatus).toBe("error");
+      expect(mocks.reportingEngine.saveReport).toHaveBeenCalled();
+    });
   });
 
   // ─── Adapter resolution ───
