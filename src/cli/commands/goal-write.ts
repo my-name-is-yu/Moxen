@@ -298,6 +298,14 @@ export async function cmdGoalArchive(
     return 1;
   }
 
+  if (goal.status !== "completed" && goal.status !== "archived") {
+    await stateManager.saveGoal({
+      ...goal,
+      status: "abandoned",
+      updated_at: new Date().toISOString(),
+    });
+  }
+
   const archived = await stateManager.archiveGoal(goalId);
   if (!archived) {
     getCliLogger().error(`Error: Failed to archive goal "${goalId}".`);
