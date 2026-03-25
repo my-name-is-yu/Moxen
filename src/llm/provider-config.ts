@@ -6,7 +6,7 @@
 
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
-import { getTavoriDirPath } from "../utils/paths.js";
+import { getSeedPulseDirPath } from "../utils/paths.js";
 import { writeJsonFileAtomic } from "../utils/json-io.js";
 
 // ─── Model Registry ───
@@ -75,7 +75,7 @@ interface LegacyProviderConfig {
 
 // ─── Constants ───
 
-const PROVIDER_CONFIG_PATH = path.join(getTavoriDirPath(), "provider.json");
+const PROVIDER_CONFIG_PATH = path.join(getSeedPulseDirPath(), "provider.json");
 
 const DEFAULT_PROVIDER_CONFIG: ProviderConfig = {
   provider: "openai",
@@ -185,8 +185,7 @@ export function validateProviderConfig(config: ProviderConfig): ValidationResult
 function resolveProvider(
   fileProvider: ProviderConfig["provider"] | undefined
 ): ProviderConfig["provider"] {
-  // New env var takes precedence, old alias as fallback
-  const envProvider = process.env["SEEDPULSE_PROVIDER"] ?? process.env["SEEDPULSE_LLM_PROVIDER"] ?? process.env["TAVORI_PROVIDER"] ?? process.env["TAVORI_LLM_PROVIDER"];
+  const envProvider = process.env["SEEDPULSE_PROVIDER"] ?? process.env["SEEDPULSE_LLM_PROVIDER"];
   if (envProvider === "anthropic" || envProvider === "openai" || envProvider === "ollama") {
     return envProvider;
   }
@@ -200,8 +199,7 @@ function resolveProvider(
 function resolveAdapter(
   fileAdapter: ProviderConfig["adapter"] | undefined
 ): ProviderConfig["adapter"] {
-  // New env var takes precedence, old alias as fallback
-  const envAdapter = process.env["SEEDPULSE_ADAPTER"] ?? process.env["SEEDPULSE_DEFAULT_ADAPTER"] ?? process.env["TAVORI_ADAPTER"] ?? process.env["TAVORI_DEFAULT_ADAPTER"];
+  const envAdapter = process.env["SEEDPULSE_ADAPTER"] ?? process.env["SEEDPULSE_DEFAULT_ADAPTER"];
   if (
     envAdapter === "claude_code_cli" ||
     envAdapter === "claude_api" ||
@@ -217,8 +215,7 @@ function resolveModel(
   fileModel: string | undefined,
   provider: ProviderConfig["provider"]
 ): string {
-  // SEEDPULSE_MODEL always wins (explicit SeedPulse-specific override)
-  const envModel = process.env["SEEDPULSE_MODEL"] ?? process.env["TAVORI_MODEL"];
+  const envModel = process.env["SEEDPULSE_MODEL"];
   if (envModel) return envModel;
 
   // provider.json explicit value takes priority over generic env vars

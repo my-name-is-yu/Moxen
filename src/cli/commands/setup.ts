@@ -12,7 +12,7 @@ import {
   MODEL_REGISTRY,
 } from "../../llm/provider-config.js";
 import type { ProviderConfig } from "../../llm/provider-config.js";
-import { getTavoriDirPath } from "../../utils/paths.js";
+import { getSeedPulseDirPath } from "../../utils/paths.js";
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 
@@ -84,7 +84,7 @@ const RECOMMENDED_ADAPTERS: Record<string, string> = {
 // ─── Config file check ───
 
 async function configFileExists(): Promise<boolean> {
-  const configPath = path.join(getTavoriDirPath(), "provider.json");
+  const configPath = path.join(getSeedPulseDirPath(), "provider.json");
   try {
     await fsp.access(configPath);
     return true;

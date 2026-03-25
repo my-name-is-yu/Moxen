@@ -121,12 +121,11 @@ async function readNpmManifest(pluginDir: string, packageName: string) {
 
 /** Check SeedPulse version compatibility, log a warning if incompatible, return false to abort. */
 function checkVersionCompat(
-  manifest: { name: string; version: string; min_tavori_version?: string; max_tavori_version?: string; min_seedpulse_version?: string; max_seedpulse_version?: string },
+  manifest: { name: string; version: string; min_seedpulse_version?: string; max_seedpulse_version?: string },
   seedpulseVersion: string
 ): boolean {
-  // Prefer new field names; fall back to deprecated tavori fields for backward compat
-  const minVer = manifest.min_seedpulse_version ?? manifest.min_tavori_version;
-  const maxVer = manifest.max_seedpulse_version ?? manifest.max_tavori_version;
+  const minVer = manifest.min_seedpulse_version;
+  const maxVer = manifest.max_seedpulse_version;
   if (!satisfiesRange(seedpulseVersion, minVer, maxVer)) {
     const range = [
       minVer ? `>=${minVer}` : "",

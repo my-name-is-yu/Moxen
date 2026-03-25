@@ -4,7 +4,7 @@
 
 import * as fsp from "node:fs/promises";
 import * as path from "node:path";
-import { getTavoriDirPath, getDatasourcesDir } from "../utils/paths.js";
+import { getSeedPulseDirPath, getDatasourcesDir } from "../utils/paths.js";
 import { readJsonFile } from "../utils/json-io.js";
 
 import { StateManager } from "../state-manager.js";
@@ -142,7 +142,7 @@ export async function buildDeps(
   );
 
   // MemoryLifecycleManager — wires 3-tier memory model into CoreLoop.
-  const seedpulseBaseDir = getTavoriDirPath();
+  const seedpulseBaseDir = getSeedPulseDirPath();
 
   // --- Embedding + Vector infrastructure ---
   const embeddingClient: IEmbeddingClient = process.env["OPENAI_API_KEY"]

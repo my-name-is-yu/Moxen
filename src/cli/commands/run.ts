@@ -1,6 +1,5 @@
 // ─── seedpulse run command ───
 
-import * as path from "node:path";
 import * as readline from "node:readline";
 import { getLogsDir } from "../../utils/paths.js";
 
@@ -32,15 +31,6 @@ function buildApprovalFn(rl: readline.Interface): (task: Task) => Promise<boolea
   };
 }
 
-function warnIfLegacyBin(): void {
-  const bin = path.basename(process.argv[1] ?? "");
-  if (bin === "tavori" || bin === "tavori.js") {
-    process.stderr.write(
-      "Deprecation notice: 'tavori' command is deprecated. Use 'seedpulse' instead.\n\n"
-    );
-  }
-}
-
 export async function cmdRun(
   stateManager: StateManager,
   characterConfigManager: CharacterConfigManager,
@@ -50,7 +40,6 @@ export async function cmdRun(
   verbose?: boolean,
   activeCoreLoopRef?: { value: import("../../core-loop.js").CoreLoop | null }
 ): Promise<number> {
-  warnIfLegacyBin();
   try {
     await ensureProviderConfig();
   } catch (err) {

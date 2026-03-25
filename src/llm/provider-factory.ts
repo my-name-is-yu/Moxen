@@ -127,11 +127,11 @@ export async function buildAdapterRegistry(
   }
 
   // Single-agent env var shortcut
-  const envBaseUrl = process.env["SEEDPULSE_A2A_BASE_URL"] ?? process.env["TAVORI_A2A_BASE_URL"];
+  const envBaseUrl = process.env["SEEDPULSE_A2A_BASE_URL"];
   if (envBaseUrl && !config.a2a?.agents) {
     registry.register(new A2AAdapter({
       baseUrl: envBaseUrl,
-      authToken: process.env["SEEDPULSE_A2A_AUTH_TOKEN"] ?? process.env["TAVORI_A2A_AUTH_TOKEN"],
+      authToken: process.env["SEEDPULSE_A2A_AUTH_TOKEN"],
     }));
   }
 

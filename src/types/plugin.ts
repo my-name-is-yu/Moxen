@@ -38,8 +38,6 @@ export const PluginManifestSchema = z.object({
   entry_point: z.string().default("dist/index.js"),
 
   // 必要なSeedPulseのバージョン（semver range）
-  min_tavori_version: z.string().optional(), // deprecated: use min_seedpulse_version
-  max_tavori_version: z.string().optional(), // deprecated: use max_seedpulse_version
   min_seedpulse_version: z.string().optional(),
   max_seedpulse_version: z.string().optional(),
 

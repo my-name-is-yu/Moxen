@@ -31,7 +31,7 @@ import { GoalDependencyGraph } from "../goal/goal-dependency-graph.js";
 import { TreeLoopOrchestrator } from "../goal/tree-loop-orchestrator.js";
 import { MemoryLifecycleManager, DriveScoreAdapter } from "../knowledge/memory-lifecycle.js";
 import { CharacterConfigManager } from "../traits/character-config.js";
-import { getTavoriDirPath } from "../utils/paths.js";
+import { getSeedPulseDirPath } from "../utils/paths.js";
 import * as GapCalculator from "../drive/gap-calculator.js";
 import * as DriveScorer from "../drive/drive-scorer.js";
 import type { GapCalculatorModule, DriveScorerModule } from "../core-loop.js";
@@ -113,7 +113,7 @@ async function buildDeps() {
     stateManager, goalTreeManager, stateAggregator, satisficingJudge
   );
 
-  const seedpulseBaseDir = getTavoriDirPath();
+  const seedpulseBaseDir = getSeedPulseDirPath();
   let memoryLifecycleManager: MemoryLifecycleManager | undefined;
   let driveScoreAdapter: DriveScoreAdapter | undefined;
   try {

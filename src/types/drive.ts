@@ -67,10 +67,6 @@ export const SeedPulseEventSchema = z.object({
 });
 export type SeedPulseEvent = z.infer<typeof SeedPulseEventSchema>;
 
-// Backward compatibility aliases
-export const TavoriEventSchema = SeedPulseEventSchema;
-export type TavoriEvent = SeedPulseEvent;
-
 // --- Stage 2 additions ---
 
 export const DriveContextSchema = z.object({

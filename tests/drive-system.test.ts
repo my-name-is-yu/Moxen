@@ -4,13 +4,13 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { StateManager } from "../src/state-manager.js";
 import { DriveSystem } from "../src/drive/drive-system.js";
-import type { TavoriEvent, GoalSchedule } from "../src/types/drive.js";
+import type { SeedPulseEvent, GoalSchedule } from "../src/types/drive.js";
 import type { Goal } from "../src/types/goal.js";
 import { makeTempDir } from "./helpers/temp-dir.js";
 import { makeGoal } from "./helpers/fixtures.js";
 import { randomUUID } from "node:crypto";
 
-function makeEvent(overrides: Partial<TavoriEvent> = {}): TavoriEvent {
+function makeEvent(overrides: Partial<SeedPulseEvent> = {}): SeedPulseEvent {
   return {
     type: "external",
     source: "test-source",
@@ -20,7 +20,7 @@ function makeEvent(overrides: Partial<TavoriEvent> = {}): TavoriEvent {
   };
 }
 
-function writeEventFile(eventsDir: string, fileName: string, event: TavoriEvent): void {
+function writeEventFile(eventsDir: string, fileName: string, event: SeedPulseEvent): void {
   const filePath = path.join(eventsDir, fileName);
   fs.writeFileSync(filePath, JSON.stringify(event, null, 2), "utf-8");
 }

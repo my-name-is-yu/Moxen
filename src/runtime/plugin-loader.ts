@@ -83,9 +83,8 @@ export class PluginLoader {
 
     // 1b. Semver compatibility check
     const seedpulseVersion = getSeedPulseVersion();
-    // Prefer new field names; fall back to deprecated tavori fields for backward compat
-    const minVer = manifest.min_seedpulse_version ?? manifest.min_tavori_version;
-    const maxVer = manifest.max_seedpulse_version ?? manifest.max_tavori_version;
+    const minVer = manifest.min_seedpulse_version;
+    const maxVer = manifest.max_seedpulse_version;
     if (!satisfiesRange(seedpulseVersion, minVer, maxVer)) {
       const range = [
         minVer ? `>=${minVer}` : "",

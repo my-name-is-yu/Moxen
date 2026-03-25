@@ -38,7 +38,7 @@ export interface RewardLogEntry {
  * Returns true when SEEDPULSE_REWARD_LOG=1 is set in the environment.
  */
 export function isRewardLogEnabled(): boolean {
-  return (process.env["SEEDPULSE_REWARD_LOG"] ?? process.env["TAVORI_REWARD_LOG"]) === "1";
+  return process.env["SEEDPULSE_REWARD_LOG"] === "1";
 }
 
 /**

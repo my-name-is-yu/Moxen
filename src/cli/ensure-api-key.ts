@@ -7,7 +7,7 @@ import * as fsp from "node:fs/promises";
 import * as path from "node:path";
 import * as tty from "node:tty";
 import { loadProviderConfig, type ProviderConfig } from "../llm/provider-config.js";
-import { getTavoriDirPath } from "../utils/paths.js";
+import { getSeedPulseDirPath } from "../utils/paths.js";
 
 /**
  * Load provider config and verify that the required API key is present for
@@ -25,7 +25,7 @@ import { getTavoriDirPath } from "../utils/paths.js";
  */
 export async function ensureProviderConfig(): Promise<ProviderConfig> {
   // Check if config file exists — if not and TTY, run setup wizard
-  const configPath = path.join(getTavoriDirPath(), "provider.json");
+  const configPath = path.join(getSeedPulseDirPath(), "provider.json");
   let configExists = false;
   try {
     await fsp.access(configPath);
