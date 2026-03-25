@@ -11,6 +11,10 @@ import { CapabilityDetector } from "../../observation/capability-detector.js";
 import { buildDeps } from "../setup.js";
 import { formatOperationError } from "../utils.js";
 import { getCliLogger } from "../cli-logger.js";
+import { Logger } from "../../runtime/logger.js";
+import { getLogsDir } from "../../utils/paths.js";
+import type { ProgressEvent } from "../../core-loop.js";
+import type { Task } from "../../types/task.js";
 import {
   normalizeSuggestPayload,
   generateSuggestOutput,
@@ -19,15 +23,20 @@ import {
 
 // ─── Shared setup helper ───
 
+type BuildDepsLoopArgs = Parameters<typeof buildDeps> extends [unknown, unknown, ...infer R] ? R : never;
+
 async function buildSuggestContext(
   stateManager: StateManager,
-  characterConfigManager: CharacterConfigManager
+  characterConfigManager: CharacterConfigManager,
+  loopArgs?: BuildDepsLoopArgs
 ): Promise<{
   deps: Awaited<ReturnType<typeof buildDeps>>;
   existingTitles: string[];
   capabilityDetector: CapabilityDetector;
 }> {
-  const deps = await buildDeps(stateManager, characterConfigManager);
+  const deps = loopArgs
+    ? await buildDeps(stateManager, characterConfigManager, ...loopArgs)
+    : await buildDeps(stateManager, characterConfigManager);
 
   const existingGoalIds = await deps.stateManager.listGoalIds();
   const existingTitles: string[] = [];
@@ -152,9 +161,60 @@ export async function cmdImprove(
     return 1;
   }
 
+  const maxSuggestions = parseInt(values.max || "3", 10);
+  const loopIterations = 10;
+
+  // Build loop deps upfront when --yes/--auto so buildDeps is only called once
+  let loopArgs: BuildDepsLoopArgs | undefined;
+  if (values.auto || values.yes) {
+    const approvalFnEarly = async (task: Task): Promise<boolean> => {
+      console.log(`\n--- Auto-approved (--yes) ---`);
+      console.log(`Task: ${task.work_description.split("\n")[0]}`);
+      return true;
+    };
+    const runLoggerEarly = new Logger({
+      dir: getLogsDir(),
+      level: "debug",
+      consoleOutput: false,
+    });
+    let lastIterationLoggedEarly = -1;
+    const onProgressEarly = (event: ProgressEvent): void => {
+      const prefix = `[${event.iteration}/${event.maxIterations}]`;
+      if (event.phase === "Observing...") {
+        if (event.iteration !== lastIterationLoggedEarly) {
+          lastIterationLoggedEarly = event.iteration;
+          const gapStr = event.gap !== undefined ? ` gap=${event.gap.toFixed(2)}` : "";
+          process.stdout.write(`${prefix} Observing...${gapStr}\n`);
+        }
+      } else if (event.phase === "Generating task...") {
+        const gapStr = event.gap !== undefined ? ` gap=${event.gap.toFixed(2)}` : "";
+        const confStr = event.confidence !== undefined ? ` confidence=${Math.round(event.confidence * 100)}%` : "";
+        process.stdout.write(`${prefix} Generating task...${gapStr}${confStr}\n`);
+      } else if (event.phase === "Skipped") {
+        const reason = event.skipReason ?? "unknown";
+        process.stdout.write(`${prefix} Skipped — ${reason.replace(/_/g, " ")}\n`);
+      } else if (event.phase === "Executing task...") {
+        if (event.taskDescription) {
+          process.stdout.write(`${prefix} Executing task: "${event.taskDescription}"\n`);
+        } else {
+          process.stdout.write(`${prefix} Executing task...\n`);
+        }
+      } else if (event.phase === "Verifying result...") {
+        if (event.taskDescription) {
+          process.stdout.write(`${prefix} Verifying: "${event.taskDescription}"\n`);
+        } else {
+          process.stdout.write(`${prefix} Verifying result...\n`);
+        }
+      } else if (event.phase === "Skipped (no state change)") {
+        process.stdout.write(`${prefix} Skipped (no state change detected)\n`);
+      }
+    };
+    loopArgs = [{ maxIterations: loopIterations }, approvalFnEarly, runLoggerEarly, onProgressEarly];
+  }
+
   let setupResult: Awaited<ReturnType<typeof buildSuggestContext>>;
   try {
-    setupResult = await buildSuggestContext(stateManager, characterConfigManager);
+    setupResult = await buildSuggestContext(stateManager, characterConfigManager, loopArgs);
   } catch (err) {
     logger.error(formatOperationError("initialise improve dependencies", err));
     return 1;
@@ -162,7 +222,6 @@ export async function cmdImprove(
 
   const { deps, existingTitles, capabilityDetector } = setupResult;
   const context = await gatherProjectContext(targetPath);
-  const maxSuggestions = parseInt(values.max || "3", 10);
   const repoFiles: string[] = [];
 
   let rawSuggestions: unknown;
@@ -238,13 +297,38 @@ export async function cmdImprove(
   // Run the loop if --auto or --yes
   if (values.auto || values.yes) {
     console.log(`[SeedPulse Improve] Starting improvement loop for goal ${goal.id}...`);
+
+    const { coreLoop } = deps;
+
+    const shutdown = () => {
+      console.log("\nStopping loop...");
+      coreLoop.stop();
+    };
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
+
+    let result: Awaited<ReturnType<typeof coreLoop.run>>;
     try {
-      await deps.coreLoop.run(goal.id);
+      result = await coreLoop.run(goal.id);
     } catch (err) {
       logger.error(formatOperationError(`run improvement loop for goal "${goal.id}"`, err));
+      process.off("SIGINT", shutdown);
+      process.off("SIGTERM", shutdown);
       return 1;
     }
+
+    process.off("SIGINT", shutdown);
+    process.off("SIGTERM", shutdown);
     console.log(`[SeedPulse Improve] Loop completed for goal ${goal.id}`);
+
+    if (result.finalStatus === "stalled") {
+      logger.error("Improvement loop stalled. No further progress detected.");
+      return 2;
+    }
+    if (result.finalStatus === "error") {
+      logger.error("Improvement loop ended with an error.");
+      return 1;
+    }
   } else {
     console.log(`Goal created. Run with: seedpulse run --goal ${goal.id}`);
   }
