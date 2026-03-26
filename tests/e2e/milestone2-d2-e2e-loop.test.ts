@@ -4,8 +4,8 @@
  * Verifies that FileExistence DataSource + LLM observation work together
  * in one CoreLoop iteration. Tests the three-dimensional goal:
  *   1. e2e_test_file_exists  — FileExistenceDataSource (mechanical)
- *   2. e2e_test_passing      — LLM observation (independent_review)
- *   3. approval_loop_fixed   — LLM observation (independent_review)
+ *   2. e2e_test_passing      — LLM observation (self_report, no DataSource)
+ *   3. approval_loop_fixed   — LLM observation (self_report, no DataSource)
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -280,9 +280,9 @@ describe("Milestone 2 D-2: E2E loop test automation goal", () => {
     expect(feEntry!.dimension_name).toBe("e2e_test_file_exists");
   });
 
-  // ─── Test 2: LLM observation returns independent_review ───
+  // ─── Test 2: LLM observation returns self_report (no DataSource available) ───
 
-  it("LLM observation returns independent_review for e2e_test_passing", async () => {
+  it("LLM observation returns self_report for e2e_test_passing (no DataSource)", async () => {
     const stateManager = new StateManager(stateDir);
 
     // Mock LLM returns score 0.85 for e2e_test_passing
@@ -313,9 +313,9 @@ describe("Milestone 2 D-2: E2E loop test automation goal", () => {
     // Find the entry for e2e_test_passing specifically
     const testPassingEntry = log.entries.find((e) => e.dimension_name === "e2e_test_passing");
     expect(testPassingEntry).toBeDefined();
-    expect(testPassingEntry!.layer).toBe("independent_review");
-    expect(testPassingEntry!.confidence).toBeGreaterThanOrEqual(0.5);
-    expect(testPassingEntry!.confidence).toBeLessThanOrEqual(0.84);
+    expect(testPassingEntry!.layer).toBe("self_report");
+    expect(testPassingEntry!.confidence).toBeGreaterThanOrEqual(0.10);
+    expect(testPassingEntry!.confidence).toBeLessThanOrEqual(0.30);
     expect(testPassingEntry!.method.type).toBe("llm_review");
   });
 
