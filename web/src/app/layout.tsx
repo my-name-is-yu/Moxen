@@ -8,11 +8,12 @@ import { StoreProvider } from '../components/providers/store-provider';
 export const metadata: Metadata = {
   title: 'SeedPulse',
   description: 'AI Agent Orchestrator Dashboard',
+  icons: { icon: '/icon.svg' },
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="ja" className={`${GeistSans.variable} ${GeistMono.variable}`}>
+    <html lang="en" className={`${GeistSans.variable} ${GeistMono.variable}`}>
       <body className="flex min-h-screen">
         <StoreProvider>
           <Sidebar />
