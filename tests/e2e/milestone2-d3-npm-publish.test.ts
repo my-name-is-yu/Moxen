@@ -203,6 +203,13 @@ function makeLLMReviewResponse(): string {
   });
 }
 
+/**
+ * LLM observation response — high score, indicates dimension is met.
+ */
+function makeObservationResponse(score: number = 0.95): string {
+  return JSON.stringify({ score, reason: "Dimension meets threshold based on observed state" });
+}
+
 // ─── Tests ───
 
 describe("Milestone 2 D-3: npm publish preparation goal", () => {
@@ -263,7 +270,6 @@ describe("Milestone 2 D-3: npm publish preparation goal", () => {
     const goalId = "goal-d3-loop-satisficing";
 
     const stateManager = new StateManager(tempDir);
-    const observationEngine = new ObservationEngine(stateManager);
     const sessionManager = new SessionManager(stateManager);
     const trustManager = new TrustManager(stateManager);
     const stallDetector = new StallDetector(stateManager);
@@ -271,11 +277,18 @@ describe("Milestone 2 D-3: npm publish preparation goal", () => {
     const reportingEngine = new ReportingEngine(stateManager);
     const driveSystem = new DriveSystem(stateManager);
 
-    // Provide responses for any potential task generation + LLM review (maxIterations=1)
-    const llmClient = createMockLLMClient([
-      "```json\n" + makeTaskGenerationResponse("package_json_valid") + "\n```",
-      makeLLMReviewResponse(),
-    ]);
+    // Provide observation responses (one per dimension per iteration) so the ObservationEngine
+    // can update confidence with real LLM scores rather than falling back to self_report
+    // (which would cap confidence at 0.30 and prevent satisficing). Provide enough for
+    // 3 dims × 3 iterations (satisficingStreak needs 2 consecutive "all met" cycles).
+    const observationResponses = Array.from({ length: 9 }, () => makeObservationResponse(0.95));
+    const llmClient = createMockLLMClient(observationResponses);
+    // Provide a contextProvider so LLM observation scores are trusted (hasContext=true).
+    // Without context, scores > 0.0 are overridden to 0.0 (no-evidence rule), which
+    // would drop current_value and prevent satisficing from triggering.
+    const contextProvider = async (_goalId: string, _dimName: string): Promise<string> =>
+      "All npm publish prerequisites are verified as complete.";
+    const observationEngine = new ObservationEngine(stateManager, [], llmClient, contextProvider);
 
     const strategyManager = new StrategyManager(stateManager, llmClient);
     const taskLifecycle = new TaskLifecycle(
