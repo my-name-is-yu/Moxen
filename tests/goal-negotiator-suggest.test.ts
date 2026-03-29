@@ -7,7 +7,7 @@ import { EthicsGate } from "../src/traits/ethics-gate.js";
 import { ObservationEngine } from "../src/observation/observation-engine.js";
 import { GoalNegotiator } from "../src/goal/goal-negotiator.js";
 import type { GoalSuggestion } from "../src/goal/goal-negotiator.js";
-import { buildSuggestGoalsPrompt } from "../src/goal/goal-suggest.js";
+import { buildSuggestGoalsPrompt, looksLikeSoftwareGoal } from "../src/goal/goal-suggest.js";
 import { createMockLLMClient } from "./helpers/mock-llm.js";
 import {
   PASS_VERDICT_SAFE_JSON as PASS_VERDICT,
@@ -261,5 +261,57 @@ describe("buildSuggestGoalsPrompt()", () => {
     expect(prompt).toContain("Goal A");
     expect(prompt).toContain("Goal B");
     expect(prompt).toContain("do NOT suggest duplicates");
+  });
+});
+
+// ─── looksLikeSoftwareGoal ───
+
+describe("looksLikeSoftwareGoal", () => {
+  const softwareContext = "Project has package.json, src/ directory, tests/, node_modules";
+
+  it("returns true for software context with software goal", () => {
+    expect(looksLikeSoftwareGoal(softwareContext, "Increase test coverage in src/")).toBe(true);
+  });
+
+  it("returns false for software context when goal description is clearly non-software and context is non-software", () => {
+    // When a purely non-software context is passed as context (no software keywords)
+    expect(looksLikeSoftwareGoal("Personal journal about cooking recipes and travel", "Improve team communication")).toBe(false);
+  });
+
+  it("returns true for software context when goal description has a non-software keyword (context wins)", () => {
+    // "communication" is a non-software keyword, but the project context is clearly software — software wins
+    expect(looksLikeSoftwareGoal(softwareContext, "Improve team communication")).toBe(true);
+  });
+
+  it("returns false when goal is about health/fitness and context is non-software", () => {
+    // "fitness" is a non-software keyword; no software kw in desc or context
+    expect(looksLikeSoftwareGoal("Personal health journal", "Start a daily fitness and exercise routine")).toBe(false);
+  });
+
+  it("returns false when goal is about health/fitness and no software keywords appear anywhere", () => {
+    expect(looksLikeSoftwareGoal("Personal health journal with diet and exercise tips", "Follow a sleep and meditation schedule")).toBe(false);
+  });
+
+  it("returns false for non-software context with no goal description", () => {
+    expect(looksLikeSoftwareGoal("Personal journal about cooking recipes and travel")).toBe(false);
+  });
+
+  it("falls back to context check when no goalDescription is provided", () => {
+    expect(looksLikeSoftwareGoal(softwareContext)).toBe(true);
+  });
+
+  it("falls back to context check when goalDescription has no non-software keywords", () => {
+    expect(looksLikeSoftwareGoal(softwareContext, "Improve API response times")).toBe(true);
+  });
+
+  it("returns true for mixed-signal goal: non-software keyword but also software keyword in description (software wins)", () => {
+    // "sales" is a non-software keyword, but "api" is a software keyword in the description — software wins
+    expect(looksLikeSoftwareGoal(softwareContext, "Add sales analytics API endpoint")).toBe(true);
+  });
+
+  it("returns true for 'Improve inter-process communication' with software context (context wins)", () => {
+    // "communication" is a non-software keyword; no software keyword in the goal description itself,
+    // but the project context is clearly software — software wins
+    expect(looksLikeSoftwareGoal(softwareContext, "Improve inter-process communication")).toBe(true);
   });
 });
