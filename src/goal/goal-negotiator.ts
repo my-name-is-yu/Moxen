@@ -151,20 +151,34 @@ export class GoalNegotiator {
     const baselineObservations = buildInitialBaseline(dimensions);
     log.step3_baseline = { observations: baselineObservations };
 
-    // Step 4: Feasibility Evaluation
-    const feasibilityResults: FeasibilityResult[] = [];
-    for (const dim of dimensions) {
-      const baseline = baselineObservations.find((o) => o.dimension === dim.name);
-      const result = await evaluateQualitatively(
-        this.llmClient,
-        dim.name,
-        rawGoalDescription,
-        baseline?.value ?? null,
-        dim.threshold_value,
-        timeHorizonDays
-      );
-      feasibilityResults.push(result);
-    }
+    // Step 4: Feasibility Evaluation (parallelized — dimensions are independent)
+    const feasibilityResults: FeasibilityResult[] = (
+      await Promise.allSettled(
+        dimensions.map((dim) => {
+          const baseline = baselineObservations.find((o) => o.dimension === dim.name);
+          return evaluateQualitatively(
+            this.llmClient,
+            dim.name,
+            rawGoalDescription,
+            baseline?.value ?? null,
+            dim.threshold_value,
+            timeHorizonDays
+          );
+        })
+      )
+    ).map((result, i) => {
+      if (result.status === "fulfilled") return result.value;
+      return {
+        dimension: dimensions[i]!.name,
+        path: "qualitative" as const,
+        feasibility_ratio: null,
+        assessment: "ambitious" as const,
+        confidence: "low" as const,
+        reasoning: `Evaluation failed: ${result.reason?.message ?? "unknown error"}`,
+        key_assumptions: [],
+        main_risks: [],
+      };
+    });
     log.step4_evaluation = { path: "qualitative", dimensions: feasibilityResults };
 
     // Step 4b: Capability Check
@@ -296,56 +310,68 @@ export class GoalNegotiator {
     const baselineObservations = buildRenegotiationBaseline(dimensions, existingGoal.dimensions);
     log.step3_baseline = { observations: baselineObservations };
 
-    // Step 4: Feasibility re-evaluation (quantitative when change rate available)
-    const feasibilityResults: FeasibilityResult[] = [];
-    for (const dim of dimensions) {
-      const baseline = baselineObservations.find((o) => o.dimension === dim.name);
-      const baselineValue = baseline?.value ?? null;
-      const existingDim = existingGoal.dimensions.find((d) => d.name === dim.name);
-      const changeRate = existingDim ? estimateChangeRate(existingDim) : null;
+    // Step 4: Feasibility re-evaluation (parallelized — dimensions are independent)
+    const feasibilityResults: FeasibilityResult[] = (
+      await Promise.allSettled(
+        dimensions.map(async (dim) => {
+          const baseline = baselineObservations.find((o) => o.dimension === dim.name);
+          const baselineValue = baseline?.value ?? null;
+          const existingDim = existingGoal.dimensions.find((d) => d.name === dim.name);
+          const changeRate = existingDim ? estimateChangeRate(existingDim) : null;
 
-      if (
-        typeof baselineValue === "number" &&
-        typeof dim.threshold_value === "number" &&
-        changeRate !== null &&
-        changeRate > 0
-      ) {
-        const necessaryChangeRate = Math.abs(dim.threshold_value - baselineValue) / timeHorizonDays;
-        const feasibilityRatio = necessaryChangeRate / changeRate;
+          if (
+            typeof baselineValue === "number" &&
+            typeof dim.threshold_value === "number" &&
+            changeRate !== null &&
+            changeRate > 0
+          ) {
+            const necessaryChangeRate = Math.abs(dim.threshold_value - baselineValue) / timeHorizonDays;
+            const feasibilityRatio = necessaryChangeRate / changeRate;
 
-        let assessment: "realistic" | "ambitious" | "infeasible";
-        if (feasibilityRatio <= FEASIBILITY_RATIO_THRESHOLD_REALISTIC) {
-          assessment = "realistic";
-        } else if (feasibilityRatio <= getFeasibilityThreshold(this.characterConfig)) {
-          assessment = "ambitious";
-        } else {
-          assessment = "infeasible";
-        }
+            let assessment: "realistic" | "ambitious" | "infeasible";
+            if (feasibilityRatio <= FEASIBILITY_RATIO_THRESHOLD_REALISTIC) {
+              assessment = "realistic";
+            } else if (feasibilityRatio <= getFeasibilityThreshold(this.characterConfig)) {
+              assessment = "ambitious";
+            } else {
+              assessment = "infeasible";
+            }
 
-        feasibilityResults.push(
-          FeasibilityResultSchema.parse({
-            dimension: dim.name,
-            path: "quantitative",
-            feasibility_ratio: feasibilityRatio,
-            assessment,
-            confidence: assessment === "realistic" ? "high" : assessment === "ambitious" ? "medium" : "low",
-            reasoning: `Feasibility ratio: ${feasibilityRatio.toFixed(2)}`,
-            key_assumptions: [`Change rate: ${changeRate.toFixed(4)}/day`],
-            main_risks: assessment === "infeasible" ? ["Target may be unreachable in time horizon"] : [],
-          })
-        );
-      } else {
-        const result = await evaluateQualitatively(
-          this.llmClient,
-          dim.name,
-          existingGoal.description,
-          baselineValue,
-          dim.threshold_value,
-          timeHorizonDays
-        );
-        feasibilityResults.push(result);
-      }
-    }
+            return FeasibilityResultSchema.parse({
+              dimension: dim.name,
+              path: "quantitative",
+              feasibility_ratio: feasibilityRatio,
+              assessment,
+              confidence: assessment === "realistic" ? "high" : assessment === "ambitious" ? "medium" : "low",
+              reasoning: `Feasibility ratio: ${feasibilityRatio.toFixed(2)}`,
+              key_assumptions: [`Change rate: ${changeRate.toFixed(4)}/day`],
+              main_risks: assessment === "infeasible" ? ["Target may be unreachable in time horizon"] : [],
+            });
+          } else {
+            return evaluateQualitatively(
+              this.llmClient,
+              dim.name,
+              existingGoal.description,
+              baselineValue,
+              dim.threshold_value,
+              timeHorizonDays
+            );
+          }
+        })
+      )
+    ).map((result, i) => {
+      if (result.status === "fulfilled") return result.value;
+      return {
+        dimension: dimensions[i]!.name,
+        path: "qualitative" as const,
+        feasibility_ratio: null,
+        assessment: "ambitious" as const,
+        confidence: "low" as const,
+        reasoning: `Evaluation failed: ${result.reason?.message ?? "unknown error"}`,
+        key_assumptions: [],
+        main_risks: [],
+      };
+    });
 
     log.step4_evaluation = {
       path: feasibilityResults.some((r) => r.path === "quantitative") ? "hybrid" : "qualitative",
